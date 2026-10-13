@@ -3,14 +3,19 @@
 //! which the messenger stores and replays on every start, and also over the realtime channel
 //! where the messenger has one, so collaborators online at the same time see them at once.
 //! Opening a file replaces the shared workbook; Save and Export hand the file to the chat.
+//!
+//! The realtime channel also carries each member's sheet and selection (presence), drawn on the
+//! others' grids; it isn't stored, so it needs a messenger with realtime channels.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
-use gridcraft_engine::Session;
 use gridcraft_engine::io::{base64_decode, base64_encode, open_bytes};
-use gridcraft_ui_egui::{Inbox, Services};
+use gridcraft_engine::{Selection, Session};
+use gridcraft_ui_egui::{Inbox, Peer, Services, SheetApp};
 use js_sys::{Array, Function, Object, Reflect, Uint8Array};
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast as _, JsValue};
 
@@ -18,13 +23,40 @@ use crate::collab::Collab;
 
 /// The realtime channel's limit per message; larger updates go by `sendUpdate` alone.
 const REALTIME_MAX: usize = 128_000;
+/// Realtime messages start with one of these.
+const TAG_UPDATE: u8 = 0;
+const TAG_PRESENCE: u8 = 1;
+/// A moving selection is sent at most this often; a still one is repeated every `HEARTBEAT_MS`,
+/// and a member not heard from for `GONE_MS` disappears.
+const PRESENCE_EVERY_MS: f64 = 100.0;
+const HEARTBEAT_MS: f64 = 5_000.0;
+const GONE_MS: f64 = 15_000.0;
+
+/// Where a member is: the shared workbook's sheet and their selection.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+struct Presence {
+    /// `selfAddr`: who it is.
+    id: String,
+    name: String,
+    sheet: usize,
+    sel: Selection,
+}
 
 pub struct Webxdc {
     api: JsValue,
     channel: Option<JsValue>,
     collab: Collab,
-    /// Updates received since the last frame.
+    ctx: Option<egui::Context>,
+    me: String,
+    /// Received since the last frame.
     received: Rc<RefCell<Vec<Vec<u8>>>>,
+    heard: Rc<RefCell<Vec<Presence>>>,
+    /// The other members online, by `selfAddr`, with when they were last heard.
+    peers: HashMap<String, (Presence, f64)>,
+    /// What was last sent, and when.
+    sent: Option<(Presence, f64)>,
+    /// Someone new is here: tell them where this member is.
+    announce: bool,
 }
 
 /// `window.webxdc`, when the page runs as a webxdc app (`webxdc.js` loaded).
@@ -51,11 +83,24 @@ impl Webxdc {
             }
         }));
         services.open_url = None;
-        Some(Webxdc { api, channel: None, collab, received: Rc::default() })
+        let me = Reflect::get(&api, &"selfAddr".into()).ok().and_then(|a| a.as_string()).unwrap_or_default();
+        Some(Webxdc {
+            api,
+            channel: None,
+            collab,
+            ctx: None,
+            me,
+            received: Rc::default(),
+            heard: Rc::default(),
+            peers: HashMap::new(),
+            sent: None,
+            announce: false,
+        })
     }
 
     /// Starts hearing updates: the stored ones first, then live ones.
     pub fn listen(&mut self, ctx: egui::Context) {
+        self.ctx = Some(ctx.clone());
         let received = self.received.clone();
         let repaint = ctx.clone();
         let on_update = Closure::<dyn FnMut(JsValue)>::new(move |update: JsValue| {
@@ -72,12 +117,18 @@ impl Webxdc {
         }
         let has_realtime = Reflect::get(&self.api, &"joinRealtimeChannel".into()).is_ok_and(|f| f.is_function());
         if let Some(channel) = has_realtime.then(|| call(&self.api, "joinRealtimeChannel", &[]).ok()).flatten() {
-            let received = self.received.clone();
+            let (received, heard) = (self.received.clone(), self.heard.clone());
             let on_data = Closure::<dyn FnMut(JsValue)>::new(move |data: JsValue| {
-                if let Some(data) = data.dyn_ref::<Uint8Array>() {
-                    received.borrow_mut().push(data.to_vec());
-                    ctx.request_repaint();
+                let Some(data) = data.dyn_ref::<Uint8Array>().map(Uint8Array::to_vec) else { return };
+                match data.split_first() {
+                    Some((&TAG_UPDATE, update)) => received.borrow_mut().push(update.to_vec()),
+                    Some((&TAG_PRESENCE, json)) => match serde_json::from_slice(json) {
+                        Ok(presence) => heard.borrow_mut().push(presence),
+                        Err(_) => return,
+                    },
+                    _ => return,
                 }
+                ctx.request_repaint();
             });
             if call(&channel, "setListener", &[on_data.as_ref().clone()]).is_ok() {
                 on_data.forget();
@@ -88,7 +139,9 @@ impl Webxdc {
 
     /// Before the frame: applies what collaborators sent, and opens picked or dropped files for
     /// everyone.
-    pub fn before(&mut self, session: &mut Session, inbox: &Inbox) {
+    pub fn before(&mut self, app: &mut SheetApp, inbox: &Inbox) {
+        self.hear(app);
+        let session = &mut app.session;
         let received = std::mem::take(&mut *self.received.borrow_mut());
         if !received.is_empty() {
             self.collab.remote(session, received);
@@ -107,10 +160,65 @@ impl Webxdc {
         }
     }
 
-    /// After the frame: sends the edits made in it.
+    /// After the frame: sends the edits made in it, and where this member is.
     pub fn after(&mut self, session: &mut Session) {
         if let Some(update) = self.collab.local(session) {
             self.send(&update);
+        }
+        self.tell(session);
+    }
+
+    /// Takes in where the others are, and drops those gone quiet.
+    fn hear(&mut self, app: &mut SheetApp) {
+        let now = js_sys::Date::now();
+        for presence in std::mem::take(&mut *self.heard.borrow_mut()) {
+            if presence.id != self.me {
+                self.announce |= !self.peers.contains_key(&presence.id);
+                self.peers.insert(presence.id.clone(), (presence, now));
+            }
+        }
+        self.peers.retain(|_, (_, seen)| now - *seen < GONE_MS);
+        let doc = self.collab.doc();
+        app.peers = self
+            .peers
+            .values()
+            .map(|(p, _)| Peer {
+                name: p.name.clone(),
+                doc,
+                sheet: p.sheet,
+                selection: p.sel.clone(),
+                color: p.id.bytes().fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize)),
+            })
+            .collect();
+    }
+
+    /// Sends this member's sheet and selection when they moved (throttled), when someone new
+    /// arrived, and as a heartbeat.
+    fn tell(&mut self, session: &Session) {
+        let (Some(channel), Some(ctx)) = (&self.channel, &self.ctx) else { return };
+        // Wake for the heartbeat and to drop members who left.
+        ctx.request_repaint_after(std::time::Duration::from_millis(1_000));
+        let Some(d) = session.active().filter(|d| d.uid == self.collab.doc()) else { return };
+        let here = Presence { id: self.me.clone(), name: session.prefs.user_name.clone(), sheet: d.wb.active_sheet, sel: d.selection.clone() };
+        let now = js_sys::Date::now();
+        let due = match &self.sent {
+            None => true,
+            Some((sent, at)) => self.announce || now - at >= HEARTBEAT_MS || (*sent != here && now - at >= PRESENCE_EVERY_MS),
+        };
+        if !due {
+            if self.sent.as_ref().is_some_and(|(sent, _)| *sent != here) {
+                ctx.request_repaint_after(std::time::Duration::from_millis(PRESENCE_EVERY_MS as u64));
+            }
+            return;
+        }
+        let Ok(json) = serde_json::to_vec(&here) else { return };
+        let message = Uint8Array::from([&[TAG_PRESENCE], json.as_slice()].concat().as_slice());
+        match call(channel, "send", &[message.into()]) {
+            Ok(_) => {
+                self.sent = Some((here, now));
+                self.announce = false;
+            }
+            Err(e) => log::warn!("couldn't share the selection: {e:?}"),
         }
     }
 
@@ -120,8 +228,8 @@ impl Webxdc {
             log::error!("couldn't share an edit: {e:?}");
         }
         if let Some(channel) = &self.channel
-            && update.len() <= REALTIME_MAX
-            && let Err(e) = call(channel, "send", &[Uint8Array::from(update).into()])
+            && update.len() < REALTIME_MAX
+            && let Err(e) = call(channel, "send", &[Uint8Array::from([&[TAG_UPDATE], update].concat().as_slice()).into()])
         {
             log::warn!("realtime send failed: {e:?}");
         }

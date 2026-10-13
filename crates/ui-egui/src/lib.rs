@@ -198,6 +198,19 @@ pub struct Services {
     pub print: Option<Box<dyn Fn(&[u8])>>,
 }
 
+/// A collaborator looking at a document: the grid outlines their selection in their colour and
+/// tags their active cell with their name.
+#[derive(Clone, Debug)]
+pub struct Peer {
+    pub name: String,
+    /// [`gridcraft_engine::DocState::uid`] of the document and the sheet they look at.
+    pub doc: u64,
+    pub sheet: usize,
+    pub selection: gridcraft_engine::Selection,
+    /// Picks their colour from the grid's reference colours.
+    pub color: usize,
+}
+
 /// Shared queue of files read asynchronously (browser file picker, drag and drop).
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
@@ -222,6 +235,8 @@ pub struct SheetApp {
     pub toast: Option<(String, f64)>,
     /// Dismissible info bar under the ribbon (open-time notices).
     pub notice: Option<Notice>,
+    /// Collaborators' selections, drawn on the grid (set by the host, such as webxdc).
+    pub peers: Vec<Peer>,
     pub services: Services,
     pub printing: printing::State,
     print_feedback_seen: Option<printing::Feedback>,
@@ -277,6 +292,7 @@ impl SheetApp {
             backstage: None,
             message: None,
             toast: None,
+            peers: vec![],
             notice: None,
             services,
             printing: Default::default(),

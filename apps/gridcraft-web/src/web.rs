@@ -119,7 +119,7 @@ impl eframe::App for WebShell {
             });
         }
         if let Some(webxdc) = &mut self.webxdc {
-            webxdc.before(&mut self.app.session, &self.inbox);
+            webxdc.before(&mut self.app, &self.inbox);
         }
         self.app.logic(ctx);
     }

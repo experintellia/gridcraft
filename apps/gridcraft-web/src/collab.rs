@@ -68,6 +68,11 @@ impl Collab {
         Some(Collab { ydoc, ops, applied: vec![], uid: base.uid, base, snapshots: vec![] })
     }
 
+    /// [`DocState::uid`] of the shared document.
+    pub fn doc(&self) -> u64 {
+        self.uid
+    }
+
     /// The edits made here since the last call, as an update for the collaborators.
     pub fn local(&mut self, s: &mut Session) -> Option<Vec<u8>> {
         let edits = s.edits.as_mut().map(std::mem::take).unwrap_or_default();
@@ -334,6 +339,7 @@ mod tests {
         let update = a.1.open(&mut a.0, "data.xlsx", wb).unwrap();
         b.1.remote(&mut b.0, vec![update]);
         assert_eq!(b.0.active().unwrap().wb.sheets.len(), 2);
+        assert_eq!(b.0.active().unwrap().uid, b.1.doc());
         assert_eq!(workbook(&a.0), workbook(&b.0));
     }
 

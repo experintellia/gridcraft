@@ -126,7 +126,8 @@ browser's file picker (dropping files works too) and Save downloads the workbook
 for Delta Chat and other messengers: everyone in the chat who starts it edits one shared workbook.
 Edits travel as commands ordered by a Yjs array ([`yrs`](https://crates.io/crates/yrs)) and replay
 on every member (`apps/gridcraft-web/src/collab.rs`). Opening a file replaces the shared workbook
-for everyone; Save sends the file to the chat.
+for everyone; Save sends the file to the chat. Where the messenger has realtime channels, each
+member sees the others' selections outlined in their colour with their name.
 
 ### Ribbon access keys
 

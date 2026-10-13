@@ -128,7 +128,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 16. Collaboration and review (F)
 - Co-authoring exists only in the webxdc build (one shared workbook per chat, ordered by Yjs;
-  undo takes back the last change of anyone; no presence or others' cursors). No Show Changes,
+  undo takes back the last change of anyone; others' selections show live only where the
+  messenger has realtime channels). No Show Changes,
   comment navigation, notes ↔ comments conversion; cloud storage requested (#86). **Estimate:** 35–55 h (co-authoring scope needs the owner).
 
 ### 17. Insert objects (F)
