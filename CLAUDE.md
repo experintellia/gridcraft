@@ -4,6 +4,9 @@ GridCraft is a clean-room, open-source, Rust-native spreadsheet targeting Micros
 
 Standards and learnings shared across the crafting apps live in `../../craftrules` (checked out next to the craft apps, or `storytold/craftrules`). Read its `AGENTS.md` at the start of a session, follow its standards, and contribute reusable learnings back there. Never code: repos don't share code.
 
+## This fork (experintellia/gridcraft)
+This checkout is the fork `experintellia/gridcraft`, not upstream `storytold/gridcraft`. Its default branch is `webxdc` (GridCraft as a webxdc app with shared editing; `packaging/webxdc/package.sh`). **Open pull requests on the fork, against `webxdc`. Never open, comment on or push to anything in `storytold/gridcraft`.**
+
 ## Start every session here
 1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md` and the relevant `plan/architecture.md` section. Behaviour reference: `plan/excel/*.md` (`observed-ui.md` holds measured observations of the running app).
 2. Follow the autonomous operation protocol (`plan/execution-plan.md` §7). Don't stop to ask unless §7 lists the decision as the user's.
