@@ -1,5 +1,12 @@
 # Releasing GridCraft
 
+> **This fork (`experintellia/gridcraft`, branch `webxdc`) releases only the webxdc app.** The
+> native release workflows (`release.yml`, `windows-arm64.yml`, `freebsd.yml`,
+> `flatpak-pages.yml`) are removed here. `.github/workflows/release-webxdc.yml` builds
+> `packaging/webxdc/package.sh` and attaches `gridcraft.xdc` to a GitHub Release: push a `v*`
+> tag (released under that tag), or run it by hand (released under `v<Cargo.toml version>`).
+> The rest of this page describes upstream's native pipeline.
+
 Every push to the `release` branch runs `.github/workflows/release.yml`. The workflow builds
 signed installers for macOS, Windows, Linux, FreeBSD and the web, then creates or updates a
 **draft** GitHub Release named `GridCraft v<version>`. Nobody sees a draft until a maintainer
