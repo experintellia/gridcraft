@@ -105,7 +105,8 @@ impl eframe::App for WebShell {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for f in dropped {
-            let inbox = self.inbox.clone();
+            // In a chat a dropped file replaces the workbook for everyone: webxdc asks first.
+            let inbox = self.webxdc.as_ref().map_or_else(|| self.inbox.clone(), |w| w.dropped.clone());
             let ctx = ctx.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped.xlsx".into());
@@ -131,7 +132,7 @@ impl eframe::App for WebShell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.app.ui(ui);
         if let Some(webxdc) = &mut self.webxdc {
-            webxdc.after(&mut self.app.session);
+            webxdc.after(&mut self.app);
         }
         if let Some(bridge) = &self.bridge {
             bridge.sync(&mut self.app);

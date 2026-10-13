@@ -125,8 +125,10 @@ browser's file picker (dropping files works too) and Save downloads the workbook
 `packaging/webxdc/package.sh` builds `gridcraft-<version>.xdc`, a [webxdc](https://webxdc.org) app
 for Delta Chat and other messengers: everyone in the chat who starts it edits one shared workbook.
 Edits travel as commands ordered by a Yjs array ([`yrs`](https://crates.io/crates/yrs)) and replay
-on every member (`apps/gridcraft-web/src/collab.rs`). Opening a file replaces the shared workbook
-for everyone; Save sends the file to the chat. Where the messenger has realtime channels, each
+on every member (`apps/gridcraft-web/src/collab.rs`). A chat with no workbook yet starts on a
+screen offering a blank workbook or a file; from then on the app is that one workbook (no New,
+Open, samples or window commands), and File › Replace with File (or dropping a file) asks before
+replacing it for everyone. Save sends the file to the chat. Where the messenger has realtime channels, each
 member sees the others' selections outlined in their colour with their name.
 
 ### Ribbon access keys

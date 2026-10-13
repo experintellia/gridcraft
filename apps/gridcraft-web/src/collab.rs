@@ -10,6 +10,9 @@
 //! same thing elsewhere, so its op carries the workbook it left instead, as do opening a file and
 //! a command given a password (which never leaves this app).
 //! Undo is shared too: it takes back the last change, whoever made it.
+//!
+//! An empty log means nobody has started the workbook yet; starting a blank one is an op that
+//! changes nothing ([`Collab::create`]).
 
 use std::sync::Arc;
 
@@ -20,6 +23,8 @@ use serde_json::Value as Json;
 use yrs::updates::decoder::Decode as _;
 use yrs::{Any, Array as _, ArrayRef, Doc, Out, ReadTxn as _, Transact as _, Update};
 
+/// The op that starts a blank shared workbook: it changes nothing, but the chat has a workbook.
+const NEW: &str = "file.new";
 /// Commands that read the clipboard or the format painter.
 const LOCAL_STATE: &[&str] = &["edit.paste", "edit.pasteSpecial", "home.insertCopiedCells", "edit.formatPainter"];
 /// A snapshot every this many ops, keeping the last `SNAPSHOTS`.
@@ -71,6 +76,19 @@ impl Collab {
     /// [`DocState::uid`] of the shared document.
     pub fn doc(&self) -> u64 {
         self.uid
+    }
+
+    /// Whether nobody has started the shared workbook: no ops yet.
+    pub fn is_empty(&self) -> bool {
+        self.applied.is_empty()
+    }
+
+    /// Starts the shared workbook, blank, for everyone.
+    pub fn create(&mut self, s: &mut Session) -> Option<Vec<u8>> {
+        let op = Op { c: NEW.into(), p: Json::Null, s: 0, sel: Selection::at(Default::default()), a: s.prefs.user_name.clone(), wb: None };
+        let update = self.append(&[serde_json::to_string(&op).ok()?.into()]);
+        self.reconcile(s);
+        Some(update)
     }
 
     /// The edits made here since the last call, as an update for the collaborators.
@@ -200,6 +218,9 @@ fn replay(s: &mut Session, json: &str) {
         log::warn!("skipped an unreadable shared op");
         return;
     };
+    if op.c == NEW && op.wb.is_none() {
+        return;
+    }
     let Some(d) = s.active_mut() else { return };
     if op.s < d.wb.sheets.len() && d.wb.active_sheet != op.s {
         Arc::make_mut(&mut d.wb).active_sheet = op.s;
@@ -348,5 +369,28 @@ mod tests {
         let mut a = peer(1);
         a.1.remote(&mut a.0, vec![vec![], vec![0xff; 40]]);
         assert!(a.0.active().is_some());
+        assert!(a.1.is_empty());
+    }
+
+    #[test]
+    fn a_new_chat_has_no_workbook_until_someone_starts_one() {
+        let (mut a, mut b) = (peer(1), peer(2));
+        assert!(a.1.is_empty() && b.1.is_empty());
+        // A blank workbook: an op that changes nothing, so the others leave their start screen.
+        let update = a.1.create(&mut a.0).unwrap();
+        assert!(!a.1.is_empty());
+        b.1.remote(&mut b.0, vec![update]);
+        assert!(!b.1.is_empty());
+        assert_eq!(b.0.documents().len(), 1, "no second document");
+        assert!(b.0.active().unwrap().undo.is_empty(), "nothing to undo");
+        assert_eq!(workbook(&a.0), workbook(&b.0));
+        // An edit or an opened file starts it too.
+        let (mut c, mut d) = (peer(3), peer(4));
+        run(&mut c.0, "cell.set", json!({"cell": "A1", "input": "1"}));
+        sync(&mut [&mut c, &mut d]);
+        assert!(!c.1.is_empty() && !d.1.is_empty());
+        let mut e = peer(5);
+        e.1.open(&mut e.0, "data.xlsx", Workbook::new()).unwrap();
+        assert!(!e.1.is_empty());
     }
 }

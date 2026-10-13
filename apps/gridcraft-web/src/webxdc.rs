@@ -2,18 +2,21 @@
 //! workbook ([`crate::collab`]). Edits travel as `sendUpdate` payloads `{y: <base64 Yjs update>}`,
 //! which the messenger stores and replays on every start, and also over the realtime channel
 //! where the messenger has one, so collaborators online at the same time see them at once.
-//! Opening a file replaces the shared workbook; Save and Export hand the file to the chat.
+//! Opening a file replaces the shared workbook (after a warning, once there is one); Save and
+//! Export hand the file to the chat. The app is that one workbook: no New, Open, samples or window
+//! commands ([`Services::single_document`]). Until someone starts it, a start screen offers a
+//! blank workbook or a file.
 //!
 //! The realtime channel also carries each member's sheet and selection (presence), drawn on the
 //! others' grids; it isn't stored, so it needs a messenger with realtime channels.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use gridcraft_engine::io::{base64_decode, base64_encode, open_bytes};
 use gridcraft_engine::{Selection, Session};
-use gridcraft_ui_egui::{Inbox, Peer, Services, SheetApp};
+use gridcraft_ui_egui::{Inbox, Peer, Services, SheetApp, Start};
 use js_sys::{Array, Function, Object, Reflect, Uint8Array};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::closure::Closure;
@@ -50,6 +53,11 @@ pub struct Webxdc {
     me: String,
     /// Received since the last frame.
     received: Rc<RefCell<Vec<Vec<u8>>>>,
+    /// The messenger has handed over the updates it stored: an empty log now means nobody has
+    /// started the workbook.
+    replayed: Rc<Cell<bool>>,
+    /// Files dropped on the window: once the workbook exists, each asks before replacing it.
+    pub dropped: Inbox,
     heard: Rc<RefCell<Vec<Presence>>>,
     /// The other members online, by `selfAddr`, with when they were last heard.
     peers: HashMap<String, (Presence, f64)>,
@@ -83,6 +91,7 @@ impl Webxdc {
             }
         }));
         services.open_url = None;
+        services.single_document = true;
         let me = Reflect::get(&api, &"selfAddr".into()).ok().and_then(|a| a.as_string()).unwrap_or_default();
         Some(Webxdc {
             api,
@@ -91,6 +100,8 @@ impl Webxdc {
             ctx: None,
             me,
             received: Rc::default(),
+            replayed: Rc::default(),
+            dropped: Inbox::default(),
             heard: Rc::default(),
             peers: HashMap::new(),
             sent: None,
@@ -111,9 +122,25 @@ impl Webxdc {
             }
         });
         match call(&self.api, "setUpdateListener", &[on_update.as_ref().clone(), 0.into()]) {
-            // Lives as long as the page.
-            Ok(_) => on_update.forget(),
-            Err(e) => log::error!("couldn't listen for shared edits: {e:?}"),
+            Ok(done) => {
+                // Lives as long as the page.
+                on_update.forget();
+                // The promise resolves once the stored updates are in; a messenger without one
+                // has handed them over already.
+                let (replayed, repaint) = (self.replayed.clone(), ctx.clone());
+                match done.dyn_into::<js_sys::Promise>() {
+                    Ok(done) => wasm_bindgen_futures::spawn_local(async move {
+                        let _ = wasm_bindgen_futures::JsFuture::from(done).await;
+                        replayed.set(true);
+                        repaint.request_repaint();
+                    }),
+                    Err(_) => replayed.set(true),
+                }
+            }
+            Err(e) => {
+                log::error!("couldn't listen for shared edits: {e:?}");
+                self.replayed.set(true);
+            }
         }
         let has_realtime = Reflect::get(&self.api, &"joinRealtimeChannel".into()).is_ok_and(|f| f.is_function());
         if let Some(channel) = has_realtime.then(|| call(&self.api, "joinRealtimeChannel", &[]).ok()).flatten() {
@@ -137,35 +164,60 @@ impl Webxdc {
         }
     }
 
-    /// Before the frame: applies what collaborators sent, and opens picked or dropped files for
-    /// everyone.
+    /// Before the frame: applies what collaborators sent, and opens picked files (and dropped
+    /// ones, once confirmed) for everyone.
     pub fn before(&mut self, app: &mut SheetApp, inbox: &Inbox) {
         self.hear(app);
-        let session = &mut app.session;
         let received = std::mem::take(&mut *self.received.borrow_mut());
         if !received.is_empty() {
-            self.collab.remote(session, received);
+            self.collab.remote(&mut app.session, received);
         }
-        let files = std::mem::take(&mut *inbox.lock().unwrap_or_else(|e| e.into_inner()));
+        let dropped = std::mem::take(&mut *self.dropped.lock().unwrap_or_else(|e| e.into_inner()));
+        let mut files = std::mem::take(&mut *inbox.lock().unwrap_or_else(|e| e.into_inner()));
+        for (name, bytes) in dropped {
+            if self.collab.is_empty() {
+                files.push((name, bytes));
+            } else {
+                app.open_dialog("replaceWorkbook", serde_json::json!({"name": name, "base64": base64_encode(&bytes)}));
+            }
+        }
         for (name, bytes) in files {
             match open_bytes(&name, &bytes) {
                 Ok((wb, _)) => {
-                    if let Some(update) = self.collab.open(session, &name, wb) {
+                    if let Some(update) = self.collab.open(&mut app.session, &name, wb) {
                         self.send(&update);
                     }
+                    app.backstage = None;
                 }
-                // The app opens it as usual and says what's wrong.
-                Err(_) => inbox.lock().unwrap_or_else(|e| e.into_inner()).push((name, bytes)),
+                // ponytail: a password-protected file isn't asked for its password here.
+                Err(e) => app.message = Some(("GridCraft".into(), gridcraft_ui_egui::clean_error(&e.to_string()))),
             }
         }
+        self.start(app);
     }
 
     /// After the frame: sends the edits made in it, and where this member is.
-    pub fn after(&mut self, session: &mut Session) {
-        if let Some(update) = self.collab.local(session) {
+    pub fn after(&mut self, app: &mut SheetApp) {
+        if let Some(update) = self.collab.local(&mut app.session) {
             self.send(&update);
         }
-        self.tell(session);
+        self.start(app);
+        self.tell(&app.session);
+    }
+
+    /// The start screen shows while nobody has started the shared workbook; a blank one chosen
+    /// there starts it for everyone.
+    fn start(&mut self, app: &mut SheetApp) {
+        app.start = if !self.collab.is_empty() || !self.replayed.get() {
+            Start::Off
+        } else if app.start == Start::Blank {
+            if let Some(update) = self.collab.create(&mut app.session) {
+                self.send(&update);
+            }
+            Start::Off
+        } else {
+            Start::Shown
+        };
     }
 
     /// Takes in where the others are, and drops those gone quiet.

@@ -196,6 +196,38 @@ pub struct Services {
     /// Web: hand PDF bytes to the browser's print flow directly (no download,
     /// no intermediate file) — opens the system print dialog on that PDF.
     pub print: Option<Box<dyn Fn(&[u8])>>,
+    /// The app is one shared document (webxdc: the chat's workbook): no New, Open, samples, Close
+    /// or window commands ([`OTHER_DOCUMENTS`]); File › Replace with File asks before a file
+    /// replaces the workbook for everyone. The host opens what arrives in `inbox` itself.
+    pub single_document: bool,
+}
+
+/// Commands that open, make, close or switch documents, which a [`Services::single_document`]
+/// host leaves out.
+pub const OTHER_DOCUMENTS: &[&str] = &[
+    "file.new",
+    "file.open",
+    "file.close",
+    "window.activate",
+    "view.newWindow",
+    "view.arrangeAll",
+    "view.hideWindow",
+    "view.unhideWindow",
+    "view.switchWindows",
+];
+
+/// The start screen of a host whose one document may not exist yet (webxdc: a chat nobody has
+/// started a workbook in).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Start {
+    /// The document exists; the sheet shows.
+    #[default]
+    Off,
+    /// Shown in place of the sheet: New blank workbook, or Open a file (which arrives through
+    /// [`Services::inbox`]).
+    Shown,
+    /// The user chose a blank workbook: the host creates it and turns the screen off.
+    Blank,
 }
 
 /// A collaborator looking at a document: the grid outlines their selection in their colour and
@@ -237,6 +269,8 @@ pub struct SheetApp {
     pub notice: Option<Notice>,
     /// Collaborators' selections, drawn on the grid (set by the host, such as webxdc).
     pub peers: Vec<Peer>,
+    /// Set by the host (webxdc).
+    pub start: Start,
     pub services: Services,
     pub printing: printing::State,
     print_feedback_seen: Option<printing::Feedback>,
@@ -293,6 +327,7 @@ impl SheetApp {
             message: None,
             toast: None,
             peers: vec![],
+            start: Start::Off,
             notice: None,
             services,
             printing: Default::default(),
@@ -366,7 +401,15 @@ impl SheetApp {
         r
     }
 
+    /// Whether this host offers command `id`: a single-document host leaves out [`OTHER_DOCUMENTS`].
+    pub fn offers(&self, id: &str) -> bool {
+        !(self.services.single_document && OTHER_DOCUMENTS.contains(&id))
+    }
+
     fn run_command(&mut self, id: &str, params: Json) -> Result<Json, String> {
+        if !self.offers(id) {
+            return Err(format!("command `{id}` is not available right now: this app is one shared workbook"));
+        }
         if matches!(id, "file.save" | "file.saveAs" | "file.saveBytes") {
             self.store_view_state();
         }
@@ -730,6 +773,12 @@ impl SheetApp {
             return;
         }
         match name {
+            // The file would replace the shared workbook: ask first (the start screen, with no
+            // workbook yet, passes `confirmed`).
+            "open" if self.services.single_document && params.get("confirmed").is_none() => {
+                self.dialog = dialogs::Dialog::open(self, "replaceWorkbook", params);
+            }
+            "start" if self.services.single_document => {}
             "open" => {
                 if let Some(start) = &self.services.open_async {
                     start();
@@ -771,6 +820,12 @@ impl SheetApp {
         if !self.commit_edit(0, 0, false, false) {
             return;
         }
+        // Home, New and Open are about other workbooks.
+        let page = if self.services.single_document && matches!(page, backstage::Page::Home | backstage::Page::New | backstage::Page::Open) {
+            backstage::Page::Info
+        } else {
+            page
+        };
         match &mut self.backstage {
             Some(b) => b.page = page,
             None => self.backstage = Some(backstage::Backstage::new(page)),
@@ -1072,11 +1127,13 @@ impl SheetApp {
             ctx.request_repaint();
         }
         control::poll(self, ctx);
-        // Files read asynchronously (web file picker, dropped files).
+        // Files read asynchronously (web file picker, dropped files). A single-document host
+        // opens them itself, into its one document.
         let arrived: Vec<(String, Vec<u8>)> = self
             .services
             .inbox
             .as_ref()
+            .filter(|_| !self.services.single_document)
             .map(|i| std::mem::take(&mut *i.lock().unwrap_or_else(std::sync::PoisonError::into_inner)))
             .unwrap_or_default();
         for (name, bytes) in arrived {
@@ -1119,11 +1176,14 @@ impl SheetApp {
         // The language the widgets translate with this frame (see `i18n::current`).
         i18n::set_current(&ctx, self.ui.language);
         let t = theme::Tokens::get(&ctx);
-        if self.backstage.is_none() {
+        let start = self.start == Start::Shown;
+        if self.backstage.is_none() && !start {
             self.ribbon_keys(&ctx);
         }
         ribbon::title_bar(self, ui);
-        if self.backstage.is_some() {
+        if start {
+            backstage::start(self, ui);
+        } else if self.backstage.is_some() {
             // File tab: the Backstage view replaces everything below the title bar.
             backstage::show(self, ui);
         } else {

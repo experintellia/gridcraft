@@ -166,9 +166,18 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
                 out.close = true;
             }
             ui.add_space(10.0);
-            for page in [Page::Home, Page::New, Page::Open] {
-                if nav_item(ui, page.icon(), lang.tr(page.label()), bs.page == page, nav_text, nav_sel).clicked() {
-                    out.page = Some(page);
+            // One shared workbook: no others to make or open, but a file may replace it (after a
+            // warning, see `SheetApp::open_dialog`).
+            let single = app.services.single_document;
+            if single {
+                if nav_item(ui, Icon::OpenFolder, lang.tr("Replace with File…"), false, nav_text, nav_sel).clicked() {
+                    app.open_dialog("open", json!({}));
+                }
+            } else {
+                for page in [Page::Home, Page::New, Page::Open] {
+                    if nav_item(ui, page.icon(), lang.tr(page.label()), bs.page == page, nav_text, nav_sel).clicked() {
+                        out.page = Some(page);
+                    }
                 }
             }
             nav_separator(ui, nav_text);
@@ -183,7 +192,7 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
                     out.page = Some(page);
                 }
             }
-            if nav_item(ui, Icon::Close, lang.tr("Close"), false, nav_text, nav_sel).clicked() {
+            if !single && nav_item(ui, Icon::Close, lang.tr("Close"), false, nav_text, nav_sel).clicked() {
                 // A cell still being edited is part of the workbook; Close keeps the unsaved prompt.
                 if app.commit_edit(0, 0, false, false) {
                     app.run_or_alert("file.close", json!({}));
@@ -565,6 +574,29 @@ fn open_page(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outc
     ui.add_space(22.0);
     section(ui, lang, "Recent");
     recent_list(app, ui, bs, out, usize::MAX);
+}
+
+/// The start screen of a host with no document yet ([`crate::Start::Shown`]; webxdc: a chat nobody
+/// has started a workbook in), in place of the ribbon, grid and tabs.
+pub fn start(app: &mut SheetApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let lang = app.ui.language;
+    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.ribbon)).show(ui, |ui| {
+        egui::Frame::NONE.inner_margin(egui::Margin { left: 44, right: 32, top: 26, bottom: 32 }).show(ui, |ui| {
+            ui.set_max_width(CONTENT_W);
+            ui.label(RichText::new(lang.tr("Start a workbook")).font(theme::ui_font(28.0)).color(t.text));
+            ui.add_space(6.0);
+            dim(ui, lang.tr("Everyone in this chat works on the same workbook."));
+            ui.add_space(18.0);
+            if action_row(ui, Icon::NewFile, lang.tr("New blank workbook"), lang.tr("Start with empty sheets.")).clicked() {
+                app.start = crate::Start::Blank;
+                ui.ctx().request_repaint();
+            }
+            if action_row(ui, Icon::OpenFolder, lang.tr("Open a file"), lang.tr("Share a workbook from this device with the chat.")).clicked() {
+                app.open_dialog("open", json!({"confirmed": true}));
+            }
+        });
+    });
 }
 
 /// Review › Protect Workbook and File › Info › Protect Workbook: the protect dialog (with an
