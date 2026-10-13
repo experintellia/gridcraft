@@ -259,6 +259,11 @@ pub struct Session {
     /// Workbook edits as they ran, for a host that shares them with collaborators (webxdc).
     /// `None`: not recording.
     pub edits: Option<Vec<Edit>>,
+    /// [`DocState::uid`] of a document whose undo and redo the host keeps (webxdc: each
+    /// collaborator takes back only their own changes). `edit.undo` and `edit.redo` leave that
+    /// document alone and are only recorded in `edits`; the host shows its own steps in the
+    /// document's `undo` and `redo` lists.
+    pub host_undo: Option<u64>,
     /// Nesting of [`Session::execute`]: only top-level commands are recorded in `edits`.
     depth: u32,
 }
@@ -274,6 +279,8 @@ pub struct Edit {
     /// The active sheet and selection it ran with.
     pub sheet: usize,
     pub selection: Selection,
+    /// The workbook it found.
+    pub before: Arc<Workbook>,
     /// The workbook it left: hosts ship this instead of the command when the command read
     /// session-local state (the clipboard, the format painter).
     pub after: Arc<Workbook>,
@@ -370,14 +377,14 @@ impl Session {
             }
         }
         if self.depth == 0
-            && (spec.undoable || matches!(id, "edit.undo" | "edit.redo"))
             && result.is_ok()
             && let Some(edits) = &mut self.edits
             && let (Some((uid, wb, _)), Some((sheet, selection))) = (&before, context)
             && let Some(d) = self.docs.iter().find(|d| d.uid == *uid)
-            && !Arc::ptr_eq(&d.wb, wb)
+            && ((spec.undoable && !Arc::ptr_eq(&d.wb, wb)) || (self.host_undo == Some(d.uid) && matches!(id, "edit.undo" | "edit.redo")))
         {
-            edits.push(Edit { doc: d.uid, id: id.to_string(), params: params.clone(), sheet, selection, after: d.wb.clone() });
+            let (before, after) = (wb.clone(), d.wb.clone());
+            edits.push(Edit { doc: d.uid, id: id.to_string(), params: params.clone(), sheet, selection, before, after });
         }
         if spec.undoable
             && let Some((uid, wb, sel)) = before
