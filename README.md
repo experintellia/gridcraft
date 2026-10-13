@@ -122,6 +122,12 @@ cd apps/gridcraft-web && trunk serve --release     # http://127.0.0.1:8771  (?sa
 You need [trunk](https://trunkrs.dev) and the `wasm32-unknown-unknown` target. Open uses the
 browser's file picker (dropping files works too) and Save downloads the workbook.
 
+`packaging/webxdc/package.sh` builds `gridcraft-<version>.xdc`, a [webxdc](https://webxdc.org) app
+for Delta Chat and other messengers: everyone in the chat who starts it edits one shared workbook.
+Edits travel as commands ordered by a Yjs array ([`yrs`](https://crates.io/crates/yrs)) and replay
+on every member (`apps/gridcraft-web/src/collab.rs`). Opening a file replaces the shared workbook
+for everyone; Save sends the file to the chat.
+
 ### Ribbon access keys
 
 Press and release **left Alt** on Windows/Linux/BSD, or press **F10** on any platform,

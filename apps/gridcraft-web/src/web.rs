@@ -36,14 +36,16 @@ pub fn start() {
                 Box::new(move |cc| {
                     let inbox: Inbox = Inbox::default();
                     let mut session = Session::new();
+                    let mut services = services(inbox.clone(), cc.egui_ctx.clone());
+                    // As a webxdc app the chat shares one workbook.
+                    let mut webxdc = crate::webxdc::api().and_then(|api| crate::webxdc::Webxdc::new(api, &mut session, &mut services));
                     // In host mode the parent sends the workbook to edit; no sample meanwhile.
-                    let q = if app_bridge.is_some() { String::new() } else { query() };
+                    let q = if app_bridge.is_some() || webxdc.is_some() { String::new() } else { query() };
                     if let Some(name) = q.split(['?', '&']).find_map(|kv| kv.strip_prefix("sample=")) {
                         let _ = session.execute("file.new", serde_json::json!({"sample": name}));
                     } else if q.contains("sample") {
                         let _ = session.execute("file.new", serde_json::json!({"sample": "sales"}));
                     }
-                    let mut services = services(inbox.clone(), cc.egui_ctx.clone());
                     if let Some(bridge) = &app_bridge {
                         bridge.connect(&mut services, inbox.clone(), cc.egui_ctx.clone());
                     }
@@ -65,7 +67,10 @@ pub fn start() {
                         }
                         bridge.post_ready();
                     }
-                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge }))
+                    if let Some(webxdc) = &mut webxdc {
+                        webxdc.listen(cc.egui_ctx.clone());
+                    }
+                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, webxdc }))
                 }),
             )
             .await;
@@ -93,6 +98,7 @@ struct WebShell {
     app: SheetApp,
     inbox: Inbox,
     bridge: Option<crate::host::Bridge>,
+    webxdc: Option<crate::webxdc::Webxdc>,
 }
 
 impl eframe::App for WebShell {
@@ -112,6 +118,9 @@ impl eframe::App for WebShell {
                 }
             });
         }
+        if let Some(webxdc) = &mut self.webxdc {
+            webxdc.before(&mut self.app.session, &self.inbox);
+        }
         self.app.logic(ctx);
     }
 
@@ -121,6 +130,9 @@ impl eframe::App for WebShell {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.app.ui(ui);
+        if let Some(webxdc) = &mut self.webxdc {
+            webxdc.after(&mut self.app.session);
+        }
         if let Some(bridge) = &self.bridge {
             bridge.sync(&mut self.app);
         }

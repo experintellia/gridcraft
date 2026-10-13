@@ -115,7 +115,7 @@ pub struct DocState {
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-const UNDO_LIMIT: usize = 100;
+pub const UNDO_LIMIT: usize = 100;
 
 impl DocState {
     pub fn new(mut wb: Workbook, path: Option<String>, title: String) -> DocState {
@@ -256,6 +256,27 @@ pub struct Session {
     /// Review › Notes › Show All Notes: every note is displayed. An application display setting
     /// (like Excel's comment indicator option), so it's not saved in the file.
     pub show_all_notes: bool,
+    /// Workbook edits as they ran, for a host that shares them with collaborators (webxdc).
+    /// `None`: not recording.
+    pub edits: Option<Vec<Edit>>,
+    /// Nesting of [`Session::execute`]: only top-level commands are recorded in `edits`.
+    depth: u32,
+}
+
+/// One command that changed a document's workbook, with the context it ran in, so another
+/// session holding the same workbook can run it again ([`Session::edits`]).
+#[derive(Clone, Debug)]
+pub struct Edit {
+    /// [`DocState::uid`] of the document it changed.
+    pub doc: u64,
+    pub id: String,
+    pub params: Json,
+    /// The active sheet and selection it ran with.
+    pub sheet: usize,
+    pub selection: Selection,
+    /// The workbook it left: hosts ship this instead of the command when the command read
+    /// session-local state (the clipboard, the format painter).
+    pub after: Arc<Workbook>,
 }
 
 impl Session {
@@ -322,7 +343,10 @@ impl Session {
         }
         let before = self.active().map(|d| (d.uid, d.wb.clone(), d.selection.clone()));
         let params = if params.is_null() { Json::Object(Default::default()) } else { params };
+        let context = self.active().map(|d| (d.wb.active_sheet, d.selection.clone()));
+        self.depth += 1;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (spec.run)(self, &params)));
+        self.depth -= 1;
         let result = match result {
             Ok(r) => r,
             Err(p) => {
@@ -344,6 +368,16 @@ impl Session {
             if self.journal.len() > 10_000 {
                 self.journal.drain(..5_000);
             }
+        }
+        if self.depth == 0
+            && (spec.undoable || matches!(id, "edit.undo" | "edit.redo"))
+            && result.is_ok()
+            && let Some(edits) = &mut self.edits
+            && let (Some((uid, wb, _)), Some((sheet, selection))) = (&before, context)
+            && let Some(d) = self.docs.iter().find(|d| d.uid == *uid)
+            && !Arc::ptr_eq(&d.wb, wb)
+        {
+            edits.push(Edit { doc: d.uid, id: id.to_string(), params: params.clone(), sheet, selection, after: d.wb.clone() });
         }
         if spec.undoable
             && let Some((uid, wb, sel)) = before
