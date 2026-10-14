@@ -2133,8 +2133,17 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             app.begin_edit(None, false);
             return;
         }
-        // On a touch screen a tap on the active cell edits it, with the on-screen keyboard (`keyboard_zones`).
-        if primary_clicked && !mods.any() && c == sel.active && ctx.input(|i| i.has_touch_screen()) {
+        // A finger tap on the active cell edits it, with the on-screen keyboard (`keyboard_zones`); checkboxes
+        // and links keep their tap.
+        let top_left = |x: CellRef| sh.merge_at(x).map_or(x, |m| m.start);
+        let finger = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Touch { phase: egui::TouchPhase::End, .. })));
+        if primary_clicked
+            && finger
+            && !mods.any()
+            && top_left(c) == top_left(sel.active)
+            && wb.styles.get(sh.style_id(c)).num_fmt.as_str() != "checkbox"
+            && !sh.hyperlinks.contains_key(&c)
+        {
             app.begin_edit(None, false);
             return;
         }
@@ -2616,7 +2625,7 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
             Some(m) => geo.range_rect(sh, m),
             None => geo.cell_rect(sh, active),
         };
-        crate::add_keyboard_zone(ctx, geo.mirror_rect(rect).intersect(geo.cells));
+        crate::add_keyboard_zone(ctx, geo.mirror_rect(rect.intersect(geo.cells)));
     }
     // The grid owns arrows, Tab and Escape (egui would otherwise move focus between widgets).
     ctx.memory_mut(|m| {

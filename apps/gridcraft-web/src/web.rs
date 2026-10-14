@@ -94,26 +94,27 @@ pub fn start() {
 /// input a frame later. So a tap on a [`gridcraft_ui_egui::keyboard_zones`] rect (the active cell, the formula bar)
 /// focuses that input right away; eframe takes the focus back if the frame starts no editing.
 fn keyboard_on_tap(canvas: &web_sys::HtmlCanvasElement, ctx: egui::Context) {
-    let start = std::rc::Rc::new(std::cell::Cell::new((0, 0)));
+    // Where and when the touch began, and whether a second finger joined it.
+    let start = std::rc::Rc::new(std::cell::Cell::new((0, 0, 0.0, false)));
     let start_set = start.clone();
     let on_start = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(move |e: web_sys::TouchEvent| {
         if let Some(t) = e.changed_touches().get(0) {
-            start_set.set((t.client_x(), t.client_y()));
+            start_set.set((t.client_x(), t.client_y(), e.time_stamp(), e.touches().length() > 1));
         }
     });
     let target = canvas.clone();
     let on_end = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(move |e: web_sys::TouchEvent| {
-        // One finger lifted, near where it went down: a tap, not a scroll or a pinch.
+        // One finger, lifted soon and near where it went down: a tap, not a scroll, a pinch or a long press.
         let Some(t) = e.changed_touches().get(0).filter(|_| e.touches().length() == 0) else { return };
-        let (x, y) = start.get();
-        if (t.client_x() - x).abs() > 10 || (t.client_y() - y).abs() > 10 {
+        let (x, y, at, multi) = start.get();
+        if multi || e.time_stamp() - at > 500.0 || (t.client_x() - x).abs() > 10 || (t.client_y() - y).abs() > 10 {
             return;
         }
         let r = target.get_bounding_client_rect();
         let zoom = ctx.zoom_factor();
         let p = egui::pos2((f64::from(t.client_x()) - r.left()) as f32 / zoom, (f64::from(t.client_y()) - r.top()) as f32 / zoom);
         // eframe puts its text input right after the canvas.
-        if gridcraft_ui_egui::keyboard_zones(&ctx).iter().any(|z| z.contains(p))
+        if gridcraft_ui_egui::tap_opens_keyboard(&ctx, p)
             && let Some(input) = target.next_element_sibling().and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
         {
             let options = web_sys::FocusOptions::new();

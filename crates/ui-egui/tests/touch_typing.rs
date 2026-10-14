@@ -1,5 +1,5 @@
-//! On a touch screen a tap on the active cell edits it, and the frames around it keep the platform text input
-//! (the on-screen keyboard) up: the active cell is a keyboard zone, the editor asks for IME from its first frame.
+//! A finger tap on the active cell (or the formula bar) edits it, and the frames around it keep the platform text
+//! input (the on-screen keyboard) up: both are keyboard zones, and editing asks for IME from its first frame.
 
 use egui::{Event, Modifiers, PointerButton, Pos2, TouchDeviceId, TouchId, TouchPhase, vec2};
 use gridcraft_engine::Session;
@@ -43,32 +43,58 @@ fn tap(h: &mut egui_kittest::Harness<'_, SheetApp>, pos: Pos2, touch: bool) {
     }
 }
 
+fn ime(h: &egui_kittest::Harness<'_, SheetApp>) -> bool {
+    h.output().platform_output.ime.is_some()
+}
+
 #[test]
 fn a_tap_on_the_active_cell_edits_it_with_the_keyboard_up() {
     let mut h = harness();
     let c3 = center(&h, CellRef::new(2, 2));
-    assert!(gridcraft_ui_egui::keyboard_zones(&h.ctx).iter().any(|z| z.contains(c3)), "the active cell opens the keyboard");
-
-    // A tap elsewhere only selects.
+    assert!(gridcraft_ui_egui::tap_opens_keyboard(&h.ctx, c3), "the active cell opens the keyboard");
     let d5 = center(&h, CellRef::new(4, 3));
-    tap(&mut h, d5, true);
-    h.run_steps(30); // Past the double-click interval.
-    assert!(h.state().editor.is_none());
-    assert_eq!(h.state().session.active().unwrap().selection.a1(), "D5");
+    assert!(!gridcraft_ui_egui::tap_opens_keyboard(&h.ctx, d5));
 
-    tap(&mut h, d5, true);
-    assert_eq!(h.state().editor.as_ref().map(|e| e.cell), Some(CellRef::new(4, 3)));
-    assert!(h.output().platform_output.ime.is_some(), "the keyboard stays up the frame editing starts");
+    // C3 is active but was never clicked, so this is no double-click.
+    tap(&mut h, c3, true);
+    assert_eq!(h.state().editor.as_ref().map(|e| e.cell), Some(CellRef::new(2, 2)));
+    assert!(ime(&h), "the keyboard stays up the frame editing starts");
     h.step();
-    assert!(h.output().platform_output.ime.is_some());
+    assert!(ime(&h));
 }
 
 #[test]
-fn a_mouse_click_on_the_active_cell_does_not_edit() {
+fn a_tap_elsewhere_only_selects() {
     let mut h = harness();
-    let c3 = center(&h, CellRef::new(2, 2));
-    h.run_steps(30);
-    tap(&mut h, c3, false);
+    let p = center(&h, CellRef::new(4, 3));
+    tap(&mut h, p, true);
+    h.step();
+    assert!(h.state().editor.is_none());
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "D5");
+}
+
+#[test]
+fn a_tap_on_the_formula_bar_keeps_the_keyboard_up() {
+    let mut h = harness();
+    let grid_top = h.state().grid.rect.unwrap().top();
+    let bar = gridcraft_ui_egui::keyboard_zones(&h.ctx).into_iter().find(|z| z.bottom() <= grid_top).expect("formula bar zone");
+    tap(&mut h, bar.center(), true);
+    assert!(h.state().editor.as_ref().is_some_and(|e| e.from_formula_bar));
+    assert!(ime(&h), "the keyboard stays up the frame editing starts");
+    h.step();
+    assert!(ime(&h));
+}
+
+#[test]
+fn a_mouse_click_on_the_active_cell_does_not_edit_even_after_a_touch() {
+    let mut h = harness();
+    let p = center(&h, CellRef::new(4, 3));
+    tap(&mut h, p, true); // A touch screen, from now on.
+    // F2 becomes active without a click, so a click on it is no double-click.
+    h.state_mut().session.execute("selection.set", json!({"cell": "F2"})).unwrap();
+    h.step();
+    let p = center(&h, CellRef::new(1, 5));
+    tap(&mut h, p, false);
     h.step();
     assert!(h.state().editor.is_none());
 }

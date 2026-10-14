@@ -1323,6 +1323,24 @@ pub fn keyboard_zones(ctx: &egui::Context) -> Vec<egui::Rect> {
     ctx.data(|d| d.get_temp(egui::Id::new(KEYBOARD_ZONES))).unwrap_or_default()
 }
 
+/// Whether a tap at `p` (points) starts typing: it hits a keyboard zone with no menu, popup or window over it.
+pub fn tap_opens_keyboard(ctx: &egui::Context, p: egui::Pos2) -> bool {
+    keyboard_zones(ctx).iter().any(|z| z.contains(p)) && ctx.layer_id_at(p).is_some_and(|l| l.order == egui::Order::Background)
+}
+
+/// Asks for the platform text input (the on-screen keyboard) at `rect` unless a focused text field already did:
+/// an editor's TextEdit takes focus a frame late, and the keyboard must not drop meanwhile.
+pub(crate) fn keep_keyboard(ctx: &egui::Context, rect: egui::Rect) {
+    ctx.output_mut(|o| {
+        o.ime.get_or_insert(egui::output::IMEOutput {
+            purpose: egui::IMEPurpose::Normal,
+            rect,
+            cursor_rect: rect,
+            should_interrupt_composition: false,
+        });
+    });
+}
+
 const KEYBOARD_ZONES: &str = "gridcraft.keyboard_zones";
 
 pub(crate) fn add_keyboard_zone(ctx: &egui::Context, rect: egui::Rect) {

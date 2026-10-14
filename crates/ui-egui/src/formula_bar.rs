@@ -51,6 +51,8 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                     crate::add_keyboard_zone(ui.ctx(), field);
                     if resp.clicked() || click.clicked() {
                         app.begin_edit(None, true);
+                        // The editor is drawn from the next frame on.
+                        crate::keep_keyboard(ui.ctx(), field);
                     }
                 }
                 let _ = editing_here;
@@ -291,16 +293,8 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
         .event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
         .show(ui);
     let resp = output.response.clone();
-    // The TextEdit takes focus a frame late: keep the platform text input (the on-screen keyboard) up meanwhile.
-    if mine && ui.ctx().output(|o| o.ime.is_none()) {
-        ui.ctx().output_mut(|o| {
-            o.ime = Some(egui::output::IMEOutput {
-                purpose: egui::IMEPurpose::Normal,
-                rect: resp.rect,
-                cursor_rect: resp.rect,
-                should_interrupt_composition: false,
-            })
-        });
+    if mine {
+        crate::keep_keyboard(ui.ctx(), resp.rect);
     }
     let synced = mine && (ed.request_focus || ed.sync_caret);
     if synced {
