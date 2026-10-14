@@ -2,7 +2,9 @@
 //!
 //! `cargo run --release -p gridcraft-ui-egui --example snapshot -- [--sample sales] [--in file.xlsx]
 //!  [--size 1440x900] [--scale 2] [--cmd 'id={json}']... [--tab Insert] [--dark] [--language en|zh|ja|ko|ru|pt|cs]
-//!  [--dialog 'name={json}'] [--hf-edit header|footer] out.png`
+//!  [--dialog 'name={json}'] [--hf-edit header|footer] [--single-document] [--start] out.png`
+//!
+//! `--single-document` draws a webxdc chat's one shared workbook; `--start` its start screen.
 
 use gridcraft_engine::Session;
 use gridcraft_ui_egui::SheetApp;
@@ -22,6 +24,7 @@ fn main() {
     let mut dialog: Option<String> = None;
     let mut language: Option<String> = None;
     let mut hf_edit: Option<String> = None;
+    let (mut single_document, mut start) = (false, false);
     let mut out = "snapshot.png".to_string();
     let mut i = 0;
     while i < args.len() {
@@ -55,6 +58,8 @@ fn main() {
                 tab = args.get(i).cloned();
             }
             "--dark" => dark = true,
+            "--single-document" => single_document = true,
+            "--start" => start = true,
             "--pane" => {
                 i += 1;
                 pane = args.get(i).cloned();
@@ -101,7 +106,10 @@ fn main() {
                 app.ui(ui);
             },
             {
-                let mut app = SheetApp::new(session, Default::default());
+                let mut app = SheetApp::new(session, gridcraft_ui_egui::Services { single_document, ..Default::default() });
+                if start {
+                    app.start = gridcraft_ui_egui::Start::Shown;
+                }
                 app.ui.dark = dark;
                 if let Some(code) = &language
                     && let Some(l) = gridcraft_ui_egui::i18n::Language::parse(code)

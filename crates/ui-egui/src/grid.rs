@@ -1673,6 +1673,7 @@ pub(crate) fn paint_selection(
         let x = geo.x(sh, *before);
         p.line_segment([pos2(x, geo.rect.top()), pos2(x, geo.rect.bottom())], Stroke::new(3.0, t.accent));
     }
+    paint_peers(p, geo, sh, app, rows, cols);
     // Marching ants around the copied range.
     if let Some(clip) = &app.session.clipboard
         && app.session.active().is_some_and(|d| d.uid == clip.doc_uid && d.wb.active_sheet == clip.sheet)
@@ -1685,6 +1686,31 @@ pub(crate) fn paint_selection(
             let phase = app.grid.marching_phase;
             let pts = [rr.left_top(), rr.right_top(), rr.right_bottom(), rr.left_bottom(), rr.left_top()];
             p.extend(egui::Shape::dashed_line_with_offset(&pts, Stroke::new(2.0, t.sel_border), &[4.0], &[4.0], phase));
+        }
+    }
+}
+
+/// Collaborators on this sheet: their areas outlined in their colour, their active cell tagged
+/// with their name.
+fn paint_peers(p: &Painter, geo: &Geo, sh: &Sheet, app: &SheetApp, rows: (u32, u32), cols: (u32, u32)) {
+    let Some(here) = app.session.active().map(|d| (d.uid, d.wb.active_sheet)) else { return };
+    for peer in app.peers.iter().filter(|peer| (peer.doc, peer.sheet) == here) {
+        let col = REF_COLORS[peer.color % REF_COLORS.len()];
+        for r in peer.selection.ranges.iter().filter(|r| range_in_pane(**r, rows, cols)) {
+            let rr = geo.range_rect(sh, *r);
+            p.rect_filled(rr, 0.0, col.gamma_multiply(0.08));
+            p.rect_stroke(rr, 0.0, Stroke::new(2.0, col), StrokeKind::Inside);
+        }
+        if range_in_pane(RangeRef::cell(peer.selection.active), rows, cols) {
+            let cell = geo.cell_rect(sh, peer.selection.active);
+            p.rect_stroke(cell, 0.0, Stroke::new(2.0, col), StrokeKind::Inside);
+            let galley = p.layout_no_wrap(peer.name.clone(), theme::ui_font(11.0), Color32::WHITE);
+            let size = galley.size() + vec2(6.0, 2.0);
+            // Above the cell, or below it where the pane's top edge would cut it off (row 1).
+            let above = cell.left_top() - vec2(0.0, size.y);
+            let tag = Rect::from_min_size(if above.y < p.clip_rect().top() { cell.left_bottom() } else { above }, size);
+            p.rect_filled(tag, 2.0, col);
+            p.galley(tag.min + vec2(3.0, 1.0), galley, Color32::WHITE);
         }
     }
 }

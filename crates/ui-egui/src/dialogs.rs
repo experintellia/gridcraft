@@ -777,6 +777,8 @@ impl Dialog {
             "saveCopy" => Dialog::custom("saveCopy", "Save a Copy", json!({"format": p("format")})),
             "saveChanges" => Dialog::custom("saveChanges", "Save Changes?", json!({"title": p("title")})),
             "start" => Dialog::custom("start", "GridCraft", json!({})),
+            // `{name, base64}`: a file already in hand (dropped); else Replace picks one.
+            "replaceWorkbook" => Dialog::custom("replaceWorkbook", "Replace Workbook", params.clone()),
             "comments" => {
                 app.grid.pane = None;
                 app.run_or_alert("review.showComments", json!({"on": true}));
@@ -1200,6 +1202,30 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                             open = false;
                         }
                     });
+                }
+                "replaceWorkbook" => {
+                    let lang = app.ui.language;
+                    ui.label(lang.tr("The file replaces this workbook for everyone in the chat. Undo brings the workbook back."));
+                    ui.add_space(8.0);
+                    let file = d.values.get("base64").and_then(Json::as_str).and_then(gridcraft_engine::io::base64_decode);
+                    ui.horizontal(|ui| {
+                        if ui.button(lang.tr(if file.is_some() { "Replace" } else { "Choose File…" })).clicked() {
+                            confirm = true;
+                        }
+                        if ui.button(lang.tr("Cancel")).clicked() {
+                            open = false;
+                        }
+                    });
+                    if confirm {
+                        match (file, &app.services.inbox) {
+                            (Some(bytes), Some(inbox)) => {
+                                let name = d.values.get("name").and_then(Json::as_str).unwrap_or("Book.xlsx").to_string();
+                                inbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((name, bytes));
+                                ctx.request_repaint();
+                            }
+                            _ => app.open_dialog("open", json!({"confirmed": true})),
+                        }
+                    }
                 }
                 "start" => {
                     ui.heading("Start a new workbook");
@@ -2246,7 +2272,7 @@ fn command_search(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm
         .session
         .commands()
         .into_iter()
-        .filter(|c| c.enabled)
+        .filter(|c| c.enabled && app.offers(c.id))
         .filter(|c| q.is_empty() || c.label.to_ascii_lowercase().contains(&q) || c.id.to_ascii_lowercase().contains(&q))
         .map(|c| (c.id.to_string(), c.label.to_string(), c.menu.join(" › ")))
         .take(40)

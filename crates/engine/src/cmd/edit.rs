@@ -596,7 +596,12 @@ fn coalesce(cells: &[CellRef]) -> Vec<RangeRef> {
 
 fn undo(s: &mut Session, p: &Json) -> Result<Json> {
     let steps = u32_param(p, "steps").unwrap_or(1).max(1);
+    let host = s.host_undo;
     let d = s.doc_mut()?;
+    if host == Some(d.uid) {
+        // The host takes it from `Session::edits`.
+        return Ok(json!({"undone": d.undo.last().map(|e| e.label.clone()).unwrap_or_default()}));
+    }
     let mut label = String::new();
     let now = d.wb.clone();
     for _ in 0..steps {
@@ -615,7 +620,12 @@ fn undo(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn redo(s: &mut Session, p: &Json) -> Result<Json> {
     let steps = u32_param(p, "steps").unwrap_or(1).max(1);
+    let host = s.host_undo;
     let d = s.doc_mut()?;
+    if host == Some(d.uid) {
+        // The host takes it from `Session::edits`.
+        return Ok(json!({"redone": d.redo.last().map(|e| e.label.clone()).unwrap_or_default()}));
+    }
     let mut label = String::new();
     let now = d.wb.clone();
     for _ in 0..steps {

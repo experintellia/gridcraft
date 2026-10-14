@@ -115,7 +115,7 @@ pub struct DocState {
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-const UNDO_LIMIT: usize = 100;
+pub const UNDO_LIMIT: usize = 100;
 
 impl DocState {
     pub fn new(mut wb: Workbook, path: Option<String>, title: String) -> DocState {
@@ -256,6 +256,34 @@ pub struct Session {
     /// Review › Notes › Show All Notes: every note is displayed. An application display setting
     /// (like Excel's comment indicator option), so it's not saved in the file.
     pub show_all_notes: bool,
+    /// Workbook edits as they ran, for a host that shares them with collaborators (webxdc).
+    /// `None`: not recording.
+    pub edits: Option<Vec<Edit>>,
+    /// [`DocState::uid`] of a document whose undo and redo the host keeps (webxdc: each
+    /// collaborator takes back only their own changes). `edit.undo` and `edit.redo` leave that
+    /// document alone and are only recorded in `edits`; the host shows its own steps in the
+    /// document's `undo` and `redo` lists.
+    pub host_undo: Option<u64>,
+    /// Nesting of [`Session::execute`]: only top-level commands are recorded in `edits`.
+    depth: u32,
+}
+
+/// One command that changed a document's workbook, with the context it ran in, so another
+/// session holding the same workbook can run it again ([`Session::edits`]).
+#[derive(Clone, Debug)]
+pub struct Edit {
+    /// [`DocState::uid`] of the document it changed.
+    pub doc: u64,
+    pub id: String,
+    pub params: Json,
+    /// The active sheet and selection it ran with.
+    pub sheet: usize,
+    pub selection: Selection,
+    /// The workbook it found.
+    pub before: Arc<Workbook>,
+    /// The workbook it left: hosts ship this instead of the command when the command read
+    /// session-local state (the clipboard, the format painter).
+    pub after: Arc<Workbook>,
 }
 
 impl Session {
@@ -317,12 +345,19 @@ impl Session {
     /// Panics inside commands are caught and reported; the workbook is restored.
     pub fn execute(&mut self, id: &str, params: Json) -> Result<Json> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        // At any depth (scripts too): the host's one document is all there is.
+        if self.host_undo.is_some() && OTHER_DOCUMENTS.contains(&id) {
+            return Err(EngineError::Disabled(id.to_string(), "this workbook is the only one here".into()));
+        }
         if let Err(why) = (spec.enabled)(self) {
             return Err(EngineError::Disabled(id.to_string(), why));
         }
         let before = self.active().map(|d| (d.uid, d.wb.clone(), d.selection.clone()));
         let params = if params.is_null() { Json::Object(Default::default()) } else { params };
+        let context = self.active().map(|d| (d.wb.active_sheet, d.selection.clone()));
+        self.depth += 1;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (spec.run)(self, &params)));
+        self.depth -= 1;
         let result = match result {
             Ok(r) => r,
             Err(p) => {
@@ -344,6 +379,16 @@ impl Session {
             if self.journal.len() > 10_000 {
                 self.journal.drain(..5_000);
             }
+        }
+        if self.depth == 0
+            && result.is_ok()
+            && let Some(edits) = &mut self.edits
+            && let (Some((uid, wb, _)), Some((sheet, selection))) = (&before, context)
+            && let Some(d) = self.docs.iter().find(|d| d.uid == *uid)
+            && ((spec.undoable && !Arc::ptr_eq(&d.wb, wb)) || (self.host_undo == Some(d.uid) && matches!(id, "edit.undo" | "edit.redo")))
+        {
+            let (before, after) = (wb.clone(), d.wb.clone());
+            edits.push(Edit { doc: d.uid, id: id.to_string(), params: params.clone(), sheet, selection, before, after });
         }
         if spec.undoable
             && let Some((uid, wb, sel)) = before
@@ -387,6 +432,20 @@ impl Session {
         r
     }
 }
+
+/// Commands that open, make, close or switch documents, which a host with one shared document
+/// ([`Session::host_undo`]) refuses.
+pub const OTHER_DOCUMENTS: &[&str] = &[
+    "file.new",
+    "file.open",
+    "file.close",
+    "window.activate",
+    "view.newWindow",
+    "view.arrangeAll",
+    "view.hideWindow",
+    "view.unhideWindow",
+    "view.switchWindows",
+];
 
 /// Convenience: the active workbook's active sheet.
 pub fn active_sheet(s: &Session) -> Option<&gridcraft_model::Sheet> {

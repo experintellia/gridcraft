@@ -14,10 +14,14 @@
 //! notes and comments.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod collab;
 #[cfg(target_arch = "wasm32")]
 mod host;
 #[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_arch = "wasm32")]
+mod webxdc;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {

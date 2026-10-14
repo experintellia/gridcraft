@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (rows auto-fit oversized fonts on open and whole-row/column formatting) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-13 · **Change:** minor (webxdc build: shared workbook editing in a chat) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -127,8 +127,10 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   [function-parity.md](function-parity.md)
 
 ### 16. Collaboration and review (F)
-- No co-authoring, Show Changes, comment navigation, notes ↔ comments
-  conversion; cloud storage requested (#86). **Estimate:** 35–55 h (co-authoring scope needs the owner).
+- Co-authoring exists only in the webxdc build (one shared workbook per chat, ordered by Yjs;
+  undo takes back only your own changes; others' selections show live only where the
+  messenger has realtime channels). No Show Changes,
+  comment navigation, notes ↔ comments conversion; cloud storage requested (#86). **Estimate:** 35–55 h (co-authoring scope needs the owner).
 
 ### 17. Insert objects (F)
 - Ink strokes now survive XLSX save/reopen as editable polylines. Inserted icons still lose their
@@ -168,6 +170,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | webxdc build: shared workbook editing in a chat (#16 co-authoring, partly) |
 | 2026-10-12 | minor | rows auto-fit oversized fonts on open and whole-row/column formatting (#833) |
 | 2026-10-12 | minor | Page Layout view: dragging margins on the rulers (#792) removed from the §14 remainder |
 | 2026-10-12 | minor | §13: Forecast Sheet Forecast Start (hindcast) landed (#785) |

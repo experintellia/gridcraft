@@ -217,3 +217,72 @@ fn a_cancelled_export_pdf_picker_writes_nothing() {
     assert!(h.state().message.is_none());
     assert!(h.state_mut().session.take_ui_requests().is_empty());
 }
+
+/// webxdc: the app is the chat's one workbook.
+#[test]
+fn a_single_document_host_offers_no_other_workbooks() {
+    let picks = Arc::new(Mutex::new(0));
+    let capture = picks.clone();
+    let inbox = gridcraft_ui_egui::Inbox::default();
+    let mut h = harness(Services {
+        single_document: true,
+        open_async: Some(Box::new(move || *capture.lock().unwrap() += 1)),
+        inbox: Some(inbox.clone()),
+        ..Default::default()
+    });
+    for id in gridcraft_ui_egui::OTHER_DOCUMENTS {
+        assert!(!h.state().offers(id));
+        assert!(h.state_mut().run(id, serde_json::json!({"index": 0})).is_err(), "{id} is left out");
+    }
+    assert!(h.state().offers("file.save"));
+    assert_eq!(h.state().session.documents().len(), 1);
+    h.state_mut().run_or_alert("file.new", serde_json::json!({}));
+    assert!(h.state().message.is_none(), "a shortcut for a left-out command only shows a toast");
+    // File opens on Info, without New, Open, Close or the samples.
+    h.get_by_label("File").click();
+    h.run_steps(3);
+    assert_eq!(page(&h), Some("info"));
+    for label in ["New", "Open", "Close", "Blank workbook"] {
+        assert!(h.query_by_label(label).is_none(), "{label} is hidden");
+    }
+    // Replace with File warns before anything happens.
+    click(&mut h, "Replace with File…");
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("replaceWorkbook"));
+    assert_eq!(*picks.lock().unwrap(), 0);
+    click(&mut h, "Choose File…");
+    assert_eq!(*picks.lock().unwrap(), 1, "the picker opens once confirmed");
+    assert!(h.state().dialog.is_none());
+    // A dropped file waits for the same answer, then goes to the host.
+    let csv = gridcraft_engine::io::base64_encode(b"1,2");
+    h.state_mut().open_dialog("replaceWorkbook", serde_json::json!({"name": "d.csv", "base64": csv}));
+    h.run_steps(2);
+    click(&mut h, "Cancel");
+    assert!(inbox.lock().unwrap().is_empty());
+    h.state_mut().open_dialog("replaceWorkbook", serde_json::json!({"name": "d.csv", "base64": csv}));
+    h.run_steps(2);
+    click(&mut h, "Replace");
+    assert_eq!(inbox.lock().unwrap().as_slice(), &[("d.csv".to_string(), b"1,2".to_vec())]);
+    assert_eq!(h.state().session.documents().len(), 1, "the host opens it, not the app");
+    // The command search leaves them out too.
+    h.key_press(egui::Key::Escape);
+    h.state_mut().open_dialog("commandSearch", serde_json::json!({}));
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("New Workbook").is_none());
+    assert!(h.query_by_label_contains("Save As").is_some());
+}
+
+/// webxdc: a chat with no workbook yet starts on New blank workbook or Open a file.
+#[test]
+fn the_start_screen_offers_a_blank_workbook_or_a_file() {
+    let picks = Arc::new(Mutex::new(0));
+    let capture = picks.clone();
+    let mut h = harness(Services { single_document: true, open_async: Some(Box::new(move || *capture.lock().unwrap() += 1)), ..Default::default() });
+    h.state_mut().start = gridcraft_ui_egui::Start::Shown;
+    h.run_steps(2);
+    assert!(h.query_by_label("File").is_none(), "the start screen replaces the ribbon");
+    click(&mut h, "Open a file");
+    assert_eq!(*picks.lock().unwrap(), 1, "nothing to replace yet: the picker opens at once");
+    assert!(h.state().dialog.is_none());
+    click(&mut h, "New blank workbook");
+    assert_eq!(h.state().start, gridcraft_ui_egui::Start::Blank, "the host creates it for everyone");
+}
