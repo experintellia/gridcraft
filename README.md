@@ -48,7 +48,24 @@
 > filmmakers, illustrators, designers, animators, hobbyists, and people who picked up a pencil
 > last week. If you make things, you're one of us. **[Come say hi on Discord](https://discord.gg/artcraft).**
 
+## This fork: GridCraft as a webxdc app
+
+This is [`experintellia/gridcraft`](https://github.com/experintellia/gridcraft), a fork of
+[`storytold/gridcraft`](https://github.com/storytold/gridcraft). It compiles GridCraft to
+WebAssembly and ships it as a **webxdc app** you can share into a [Delta Chat](https://delta.chat/) conversation.
+
+[webxdc](https://webxdc.org/) apps are small web apps packed into a single `.xdc` file (a zip
+with an `index.html`) and sent like any attachment. They run inside the messenger, sandboxed and
+offline: no server and no internet access, only messages exchanged with the other chat members
+through the chat itself, end-to-end encrypted.
+
+Everyone in the chat who opens GridCraft edits one shared workbook; changes travel as chat
+messages, and undo takes back only your own changes. Build the `.xdc` with
+`packaging/webxdc/package.sh` (needs [`trunk`](https://trunkrs.dev/)); the result lands in
+`dist/release/gridcraft-<version>.xdc`, ready to drop into a chat.
+
 <p align="center">
+  <a href="#this-fork-gridcraft-as-a-webxdc-app">This fork (webxdc)</a> ·
   <a href="#a-look-around">A look around</a> ·
   <a href="#why-gridcraft">Why GridCraft</a> ·
   <a href="#quick-start">Quick start</a> ·
