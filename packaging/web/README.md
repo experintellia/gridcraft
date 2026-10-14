@@ -80,3 +80,15 @@ GridCraft's web build is the same egui app as the desktop one, compiled to wasm
 quicker to start than wgpu's WebGPU path, which egui's plain triangles don't need.
 
 A browser without WebGL2 gets a message in place of the app.
+
+## Startup timings
+
+The web and webxdc builds log one report to the browser console once the workbook (or the
+webxdc start screen) has painted: **GridCraft startup**, each step in ms since the page started
+loading (fetching and compiling the wasm, WebGL2, fonts, the first frame, and as a webxdc app the
+stored updates the messenger handed over and how long applying them took). Copy it from the
+devtools console when reporting a slow start.
+
+They build with the `wasm-release` cargo profile (`opt-level = "s"`, fat LTO, one codegen
+unit): a third smaller than `release`, so the wasm loads and compiles sooner, with no measured
+loss of calculation speed.

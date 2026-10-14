@@ -118,9 +118,14 @@ impl Webxdc {
         self.ctx = Some(ctx.clone());
         let received = self.received.clone();
         let repaint = ctx.clone();
+        // Stored updates handed over, and their bytes, for the startup report.
+        let stored = Rc::new(Cell::new((0usize, 0usize)));
+        let count = stored.clone();
         let on_update = Closure::<dyn FnMut(JsValue)>::new(move |update: JsValue| {
             let y = Reflect::get(&update, &"payload".into()).and_then(|p| Reflect::get(&p, &"y".into())).ok().and_then(|y| y.as_string());
             if let Some(bytes) = y.as_deref().and_then(base64_decode) {
+                let (n, size) = count.get();
+                count.set((n + 1, size + bytes.len()));
                 received.borrow_mut().push(bytes);
                 repaint.request_repaint();
             }
@@ -135,6 +140,8 @@ impl Webxdc {
                 match done.dyn_into::<js_sys::Promise>() {
                     Ok(done) => wasm_bindgen_futures::spawn_local(async move {
                         let _ = wasm_bindgen_futures::JsFuture::from(done).await;
+                        let (n, size) = stored.get();
+                        crate::perf::mark(format!("messenger handed over {n} stored updates ({} KB)", size / 1000));
                         replayed.set(true);
                         repaint.request_repaint();
                     }),
@@ -174,7 +181,9 @@ impl Webxdc {
         self.hear(app);
         let received = std::mem::take(&mut *self.received.borrow_mut());
         if !received.is_empty() {
+            let (n, size, t) = (received.len(), received.iter().map(Vec::len).sum::<usize>(), crate::perf::now());
             self.collab.remote(&mut app.session, received);
+            crate::perf::mark(format!("applied {n} updates ({} KB) in {:.0} ms", size / 1000, crate::perf::now() - t));
         }
         let dropped = std::mem::take(&mut *self.dropped.lock().unwrap_or_else(|e| e.into_inner()));
         let mut files = std::mem::take(&mut *inbox.lock().unwrap_or_else(|e| e.into_inner()));
