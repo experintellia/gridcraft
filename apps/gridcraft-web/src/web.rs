@@ -91,7 +91,7 @@ pub fn start() {
 
 /// iOS opens the on-screen keyboard only for a text field focused inside a touch handler, and eframe focuses its text
 /// input a frame later. So on touch screens eframe's (transparent) text input lies over the active cell, where a tap
-/// focuses it natively and edits the cell ([`gridcraft_ui_egui::cell_zone`]); a tap on another
+/// focuses it natively and, once focused, edits the cell ([`gridcraft_ui_egui::cell_zone`]); a tap on another
 /// [`gridcraft_ui_egui::keyboard_zones`] rect (the formula bar) focuses it from the touch handler. eframe takes the
 /// focus back if the frame starts no editing.
 fn keyboard_on_tap(ctx: egui::Context) {
@@ -104,11 +104,16 @@ fn keyboard_on_tap(ctx: egui::Context) {
     // Where and when the touch began, and whether a second finger joined it.
     let start = std::rc::Rc::new(std::cell::Cell::new((0, 0, 0.0, false)));
     let start_set = start.clone();
+    // A tap on the input over the active cell, waiting for iOS to focus the input.
+    let tapped = std::rc::Rc::new(std::cell::Cell::new(false));
+    let (tapped_start, tapped_end) = (tapped.clone(), tapped.clone());
     let on_start = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(move |e: web_sys::TouchEvent| {
+        tapped_start.set(false);
         if let Some(t) = e.changed_touches().get(0) {
             start_set.set((t.client_x(), t.client_y(), e.time_stamp(), e.touches().length() > 1));
         }
     });
+    let focus_ctx = ctx.clone();
     let on_end = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(move |e: web_sys::TouchEvent| {
         // One finger, lifted soon and near where it went down: a tap, not a scroll, a pinch or a long press.
         let Some(t) = e.changed_touches().get(0).filter(|_| e.touches().length() == 0) else { return };
@@ -119,7 +124,9 @@ fn keyboard_on_tap(ctx: egui::Context) {
         let Some((canvas, input)) = canvas_and_input() else { return };
         let target = e.target();
         if target.as_ref() == Some(input.as_ref()) {
-            gridcraft_ui_egui::tap_cell_zone(&ctx);
+            // iOS focuses the input after `touchend`, where its tap lands then: editing now would shrink the input
+            // away from under that tap first, and the keyboard would stay down.
+            tapped_end.set(true);
             return;
         }
         if target.as_ref() != Some(canvas.as_ref()) {
@@ -137,9 +144,17 @@ fn keyboard_on_tap(ctx: egui::Context) {
     // Capturing: eframe stops touches on the canvas from bubbling.
     let _ = document.add_event_listener_with_callback_and_bool("touchstart", on_start.as_ref().unchecked_ref(), true);
     let _ = document.add_event_listener_with_callback_and_bool("touchend", on_end.as_ref().unchecked_ref(), true);
+    let on_focus = Closure::<dyn FnMut(web_sys::FocusEvent)>::new(move |e: web_sys::FocusEvent| {
+        let on_input = canvas_and_input().is_some_and(|(_, input)| e.target().as_ref() == Some(input.as_ref()));
+        if on_input && tapped.replace(false) {
+            gridcraft_ui_egui::tap_cell_zone(&focus_ctx);
+        }
+    });
+    let _ = document.add_event_listener_with_callback_and_bool("focusin", on_focus.as_ref().unchecked_ref(), true);
     // Listening for the page's lifetime.
     on_start.forget();
     on_end.forget();
+    on_focus.forget();
 }
 
 /// iOS pans the page to keep a natively focused text input above the keyboard, and doesn't always pan back once the
