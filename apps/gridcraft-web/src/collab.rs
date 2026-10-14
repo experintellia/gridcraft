@@ -44,8 +44,6 @@ const SNAPSHOT_EVERY: usize = 16;
 const SNAPSHOTS: usize = 16;
 /// Deepest path a patch may have; a remote op with a deeper one is refused.
 const MAX_PATH: usize = 32;
-/// Names the shared workbook: its title, and the name Save suggests.
-const RENAME: &str = "file.rename";
 
 #[derive(Serialize, Deserialize)]
 struct Op {
@@ -98,8 +96,6 @@ pub struct Collab {
     /// This member's own undo and redo steps.
     undo: Vec<Step>,
     redo: Vec<Step>,
-    /// The shared workbook's title as of the ops: a different one here is a rename to share.
-    title: String,
 }
 
 impl Collab {
@@ -112,7 +108,7 @@ impl Collab {
         s.host_undo = Some(base.uid);
         let ydoc = Doc::with_client_id(client_id);
         let ops = ydoc.get_or_insert_array("ops");
-        Some(Collab { ydoc, ops, applied: vec![], uid: base.uid, title: base.title.clone(), base, snapshots: vec![], undo: vec![], redo: vec![] })
+        Some(Collab { ydoc, ops, applied: vec![], uid: base.uid, base, snapshots: vec![], undo: vec![], redo: vec![] })
     }
 
     /// [`DocState::uid`] of the shared document.
@@ -120,9 +116,9 @@ impl Collab {
         self.uid
     }
 
-    /// The shared workbook's title, as everyone has it.
-    pub fn title(&self) -> &str {
-        &self.title
+    /// The shared workbook's title: an opened file's name, or one given by `file.rename`.
+    pub fn title(&self, s: &Session) -> String {
+        s.documents().iter().find(|d| d.uid == self.uid).map(DocState::display_title).unwrap_or_default()
     }
 
     /// Whether nobody has started the shared workbook: no ops yet.
@@ -142,24 +138,11 @@ impl Collab {
     /// The edits made here since the last call, as an update for the collaborators.
     pub fn local(&mut self, s: &mut Session) -> Option<Vec<u8>> {
         let edits: Vec<_> = s.edits.as_mut().map(std::mem::take).unwrap_or_default().into_iter().filter(|e| e.doc == self.uid).collect();
-        // A rename changes no workbook, so it isn't among the edits: compare the titles.
-        let renamed = s.documents().iter().find(|d| d.uid == self.uid && d.title != self.title).map(|d| {
-            self.title.clone_from(&d.title);
-            Op {
-                c: RENAME.into(),
-                p: serde_json::json!({"name": d.title}),
-                s: d.wb.active_sheet,
-                sel: d.selection.clone(),
-                a: s.prefs.user_name.clone(),
-                wb: None,
-                d: vec![],
-            }
-        });
-        if edits.is_empty() && renamed.is_none() {
+        if edits.is_empty() {
             return None;
         }
         let author = s.prefs.user_name.clone();
-        let mut ops: Vec<Arc<str>> = renamed.and_then(|op| serde_json::to_string(&op).ok()).map(Into::into).into_iter().collect();
+        let mut ops: Vec<Arc<str>> = vec![];
         // The first undo or redo: it hasn't changed the workbook here yet.
         let mut stale = None;
         for e in edits {
@@ -210,7 +193,9 @@ impl Collab {
     }
 
     /// Opens a workbook for everyone, replacing the shared one.
-    pub fn open(&mut self, s: &mut Session, name: &str, wb: Workbook) -> Option<Vec<u8>> {
+    pub fn open(&mut self, s: &mut Session, name: &str, mut wb: Workbook) -> Option<Vec<u8>> {
+        // Everyone's title is the file's name; undoing the open takes it back.
+        wb.name = std::path::Path::new(name).file_name().map(|n| n.to_string_lossy().to_string());
         let sel = Selection::at(wb.active().map(|sh| sh.view_active).unwrap_or_default());
         let before = s.documents().iter().find(|d| d.uid == self.uid)?.wb.clone();
         let after = Arc::new(wb.clone());
@@ -301,9 +286,6 @@ impl Collab {
             d.revision = d.revision.max(revision + 1);
         }
         (s.clipboard, s.format_painter, s.edits, s.prefs.user_name) = (clipboard, painter, edits, author);
-        if let Some(d) = s.active() {
-            self.title.clone_from(&d.title);
-        }
         s.take_ui_requests();
         s.set_active(active);
         self.mirror(s);
@@ -344,16 +326,6 @@ fn replay(s: &mut Session, json: &str) {
     if op.c == NEW && op.wb.is_none() {
         return;
     }
-    if op.c == RENAME {
-        if let Err(e) = s.execute(RENAME, op.p) {
-            log::info!("skipped a shared rename: {e}");
-        }
-        return;
-    }
-    // Everyone's title is an opened file's name.
-    let opened = (op.c == "file.open")
-        .then(|| op.p.get("name").and_then(Json::as_str).and_then(|n| std::path::Path::new(n).file_name()).map(|n| n.to_string_lossy().to_string()))
-        .flatten();
     // Hostile input: only what this host records (undoable commands, or a workbook or patches it
     // carries), on a sheet that still exists, with a selection inside the grid.
     let runs = op.wb.as_ref().map_or(!op.d.is_empty() || find_command(&op.c).is_some_and(|c| c.undoable), |wb| !wb.sheets.is_empty());
@@ -390,12 +362,6 @@ fn replay(s: &mut Session, json: &str) {
             d.calc.recalc_all(&mut wb);
             d.wb = Arc::new(wb);
             d.revision += 1;
-            // Hostile input: `file.rename` takes only a bare, bounded name.
-            if let Some(name) = opened
-                && let Err(e) = s.execute(RENAME, serde_json::json!({"name": name}))
-            {
-                log::info!("kept the title: {e}");
-            }
         }
         None => {
             s.prefs.user_name = op.a;
@@ -811,6 +777,10 @@ mod tests {
         assert_eq!(workbook(&a.0), workbook(&b.0));
         assert_eq!(a.0.active().unwrap().display_title(), "data.xlsx");
         assert_eq!(b.0.active().unwrap().display_title(), "data.xlsx");
+        // Undoing the open takes its name back too.
+        run(&mut a.0, "edit.undo", json!({}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!((a.1.title(&a.0), b.1.title(&b.0)), ("Book1".into(), "Book1".into()));
     }
 
     #[test]
@@ -820,18 +790,22 @@ mod tests {
         run(&mut a.0, "file.rename", json!({"name": "Budget"}));
         sync(&mut [&mut a, &mut b]);
         assert_eq!(b.0.active().unwrap().display_title(), "Budget");
-        assert_eq!((a.1.title(), b.1.title()), ("Budget", "Budget"));
+        assert_eq!((a.1.title(&a.0), b.1.title(&b.0)), ("Budget".into(), "Budget".into()));
         assert_eq!(value(&mut b.0, "A1").as_f64(), Some(1.0));
         // Alone, too: a rename is an op of its own.
         run(&mut b.0, "file.rename", json!({"name": "Q3"}));
         sync(&mut [&mut a, &mut b]);
         assert_eq!(a.0.active().unwrap().display_title(), "Q3");
+        // Undo takes back only b's own rename, for everyone.
+        run(&mut b.0, "edit.undo", json!({}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!((a.1.title(&a.0), b.1.title(&b.0)), ("Budget".into(), "Budget".into()));
         // Hostile input: a name `file.rename` refuses leaves the title as it was.
         let sel = json!({"active": {"row": 0, "col": 0}, "anchor": {"row": 0, "col": 0}, "ranges": [{"start": {"row": 0, "col": 0}, "end": {"row": 0, "col": 0}}]});
-        let op: Arc<str> = json!({"c": RENAME, "p": {"name": "../../x"}, "s": 0, "sel": sel}).to_string().into();
+        let op: Arc<str> = json!({"c": "file.rename", "p": {"name": "../../x"}, "s": 0, "sel": sel}).to_string().into();
         let update = b.1.append(&[op]);
         a.1.remote(&mut a.0, vec![update]);
-        assert_eq!(a.0.active().unwrap().display_title(), "Q3");
+        assert_eq!(a.0.active().unwrap().display_title(), "Budget");
     }
 
     #[test]

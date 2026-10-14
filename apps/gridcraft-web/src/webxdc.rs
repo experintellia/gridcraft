@@ -100,7 +100,7 @@ impl Webxdc {
         services.open_url = None;
         services.single_document = true;
         let me = Reflect::get(&api, &"selfAddr".into()).ok().and_then(|a| a.as_string()).unwrap_or_default();
-        let named = collab.title().to_string();
+        let named = collab.title(session);
         Some(Webxdc {
             named,
             api,
@@ -195,7 +195,7 @@ impl Webxdc {
             match open_bytes(&name, &bytes) {
                 Ok((wb, _)) => {
                     if let Some(update) = self.collab.open(&mut app.session, &name, wb) {
-                        self.send(&update);
+                        self.send(&app.session, &update);
                     }
                     app.backstage = None;
                 }
@@ -209,7 +209,7 @@ impl Webxdc {
     /// After the frame: sends the edits made in it, and where this member is.
     pub fn after(&mut self, app: &mut SheetApp) {
         if let Some(update) = self.collab.local(&mut app.session) {
-            self.send(&update);
+            self.send(&app.session, &update);
         }
         self.start(app);
         self.tell(&app.session);
@@ -224,7 +224,7 @@ impl Webxdc {
             Start::Loading
         } else if app.start == Start::Blank {
             if let Some(update) = self.collab.create(&mut app.session) {
-                self.send(&update);
+                self.send(&app.session, &update);
             }
             Start::Off
         } else {
@@ -295,11 +295,12 @@ impl Webxdc {
 
     /// Sends `update`, and the workbook's name when it changed (opened or renamed): the messenger
     /// shows it next to the app's (`document`; the latest one wins).
-    fn send(&mut self, update: &[u8]) {
+    fn send(&mut self, s: &Session, update: &[u8]) {
         let payload = object(&[("y", base64_encode(update).into())]);
         let mut fields = vec![("payload", payload)];
-        if self.collab.title() != self.named {
-            self.named = self.collab.title().to_string();
+        let title = self.collab.title(s);
+        if title != self.named {
+            self.named = title;
             let stem = std::path::Path::new(&self.named).file_stem().map_or_else(|| self.named.clone(), |s| s.to_string_lossy().to_string());
             fields.push(("document", stem.into()));
         }

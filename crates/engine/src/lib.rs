@@ -174,13 +174,25 @@ impl DocState {
             self.saved = self.wb.clone();
         }
     }
+    /// The file's name; else the name given by `file.rename` (hostile input in a shared or
+    /// opened workbook: only a [`valid_name`]); else the title.
     pub fn display_title(&self) -> String {
         self.path
             .as_deref()
             .and_then(|p| std::path::Path::new(p).file_name())
             .map(|n| n.to_string_lossy().to_string())
+            .or_else(|| self.wb.name.clone().filter(|n| valid_name(n)))
             .unwrap_or_else(|| self.title.clone())
     }
+}
+
+/// Longest workbook name `file.rename` takes.
+pub const MAX_NAME: usize = 255;
+
+/// A workbook name `file.rename` takes: 1 to [`MAX_NAME`] characters, trimmed, without control
+/// characters or path separators.
+pub fn valid_name(name: &str) -> bool {
+    !name.is_empty() && name.trim() == name && name.chars().count() <= MAX_NAME && !name.chars().any(|c| c.is_control() || matches!(c, '/' | '\\'))
 }
 
 /// Engine-side preferences.

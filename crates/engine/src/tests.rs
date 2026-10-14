@@ -3294,6 +3294,16 @@ fn rename_titles_an_unsaved_workbook() {
         assert!(s.execute("file.rename", json!({"name": bad})).is_err(), "{bad:?}");
     }
     assert_eq!(s.doc().unwrap().display_title(), "Budget 2026");
+    s.execute("file.rename", json!({"name": "Q3"})).unwrap();
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().display_title(), "Budget 2026");
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().display_title(), "Book1");
+    s.execute("edit.redo", json!({"steps": 2})).unwrap();
+    assert_eq!(s.doc().unwrap().display_title(), "Q3");
+    // Hostile input: a name the workbook carries counts only if `file.rename` would take it.
+    std::sync::Arc::make_mut(&mut s.active_mut().unwrap().wb).name = Some("../x".into());
+    assert_eq!(s.doc().unwrap().display_title(), "Book1");
     s.active_mut().unwrap().path = Some("/tmp/book.xlsx".into());
     assert!(s.execute("file.rename", json!({"name": "Other"})).is_err());
 }
