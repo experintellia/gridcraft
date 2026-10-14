@@ -2133,6 +2133,11 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             app.begin_edit(None, false);
             return;
         }
+        // On a touch screen a tap on the active cell edits it, with the on-screen keyboard (`keyboard_zones`).
+        if primary_clicked && !mods.any() && c == sel.active && ctx.input(|i| i.has_touch_screen()) {
+            app.begin_edit(None, false);
+            return;
+        }
         app.grid.last_click = Some((c, now));
         if mods.shift {
             let _ = app.session.run("selection.set", json!({"range": RangeRef::new(sel.anchor, c).a1(), "active": sel.active.a1()}));
@@ -2604,6 +2609,14 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
     }
     if ctx.memory(|m| m.focused()).is_none() {
         resp.request_focus();
+    }
+    // Typing (or a tap, on a touch screen) edits the active cell.
+    if let Some(active) = app.session.active().map(|d| d.selection.active) {
+        let rect = match sh.merge_at(active) {
+            Some(m) => geo.range_rect(sh, m),
+            None => geo.cell_rect(sh, active),
+        };
+        crate::add_keyboard_zone(ctx, geo.mirror_rect(rect).intersect(geo.cells));
     }
     // The grid owns arrows, Tab and Escape (egui would otherwise move focus between widgets).
     ctx.memory_mut(|m| {

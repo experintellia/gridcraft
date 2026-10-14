@@ -1157,6 +1157,7 @@ impl SheetApp {
     /// Lays out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        ctx.data_mut(|d| d.remove::<Vec<egui::Rect>>(egui::Id::new(KEYBOARD_ZONES)));
         self.poll_printing(&ctx);
         if !self.fonts_ready || self.fonts_rebind {
             ctx.request_repaint();
@@ -1314,6 +1315,18 @@ pub fn clean_error(e: &str) -> String {
         return rest.to_string();
     }
     e.to_string()
+}
+
+/// Where a tap starts typing this frame (the active cell, the formula bar), in points. iOS opens the on-screen keyboard
+/// only for a text field focused inside the touch handler itself, so the web shell focuses its text input there.
+pub fn keyboard_zones(ctx: &egui::Context) -> Vec<egui::Rect> {
+    ctx.data(|d| d.get_temp(egui::Id::new(KEYBOARD_ZONES))).unwrap_or_default()
+}
+
+const KEYBOARD_ZONES: &str = "gridcraft.keyboard_zones";
+
+pub(crate) fn add_keyboard_zone(ctx: &egui::Context, rect: egui::Rect) {
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<egui::Rect>>(egui::Id::new(KEYBOARD_ZONES)).push(rect));
 }
 
 #[allow(clippy::disallowed_methods)] // the clock is read only off wasm

@@ -4,6 +4,7 @@ use gridcraft_engine::Session;
 use gridcraft_ui_egui::{Inbox, Services, SheetApp};
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::JsValue;
+use wasm_bindgen::closure::Closure;
 
 const CANVAS_ID: &str = "gridcraft_canvas";
 const LOADING_ID: &str = "gridcraft_loading";
@@ -25,12 +26,14 @@ pub fn start() {
         // workbooks in it and stores what it saves (`host`).
         let bridge = if query_param("host").as_deref() == Some("parent") { crate::host::Bridge::new() } else { None };
         let app_bridge = bridge.clone();
+        let tap_target = canvas.clone();
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
                 options,
                 Box::new(move |cc| {
                     crate::perf::mark("WebGL2 context ready");
+                    keyboard_on_tap(&tap_target, cc.egui_ctx.clone());
                     let inbox: Inbox = Inbox::default();
                     let mut session = Session::new();
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone());
@@ -85,6 +88,44 @@ pub fn start() {
             }
         }
     });
+}
+
+/// iOS opens the on-screen keyboard only for an input focused inside a touch handler, and eframe focuses its text
+/// input a frame later. So a tap on a [`gridcraft_ui_egui::keyboard_zones`] rect (the active cell, the formula bar)
+/// focuses that input right away; eframe takes the focus back if the frame starts no editing.
+fn keyboard_on_tap(canvas: &web_sys::HtmlCanvasElement, ctx: egui::Context) {
+    let start = std::rc::Rc::new(std::cell::Cell::new((0, 0)));
+    let start_set = start.clone();
+    let on_start = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(move |e: web_sys::TouchEvent| {
+        if let Some(t) = e.changed_touches().get(0) {
+            start_set.set((t.client_x(), t.client_y()));
+        }
+    });
+    let target = canvas.clone();
+    let on_end = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(move |e: web_sys::TouchEvent| {
+        // One finger lifted, near where it went down: a tap, not a scroll or a pinch.
+        let Some(t) = e.changed_touches().get(0).filter(|_| e.touches().length() == 0) else { return };
+        let (x, y) = start.get();
+        if (t.client_x() - x).abs() > 10 || (t.client_y() - y).abs() > 10 {
+            return;
+        }
+        let r = target.get_bounding_client_rect();
+        let zoom = ctx.zoom_factor();
+        let p = egui::pos2((f64::from(t.client_x()) - r.left()) as f32 / zoom, (f64::from(t.client_y()) - r.top()) as f32 / zoom);
+        // eframe puts its text input right after the canvas.
+        if gridcraft_ui_egui::keyboard_zones(&ctx).iter().any(|z| z.contains(p))
+            && let Some(input) = target.next_element_sibling().and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        {
+            let options = web_sys::FocusOptions::new();
+            options.set_prevent_scroll(true);
+            let _ = input.focus_with_options(&options);
+        }
+    });
+    let _ = canvas.add_event_listener_with_callback("touchstart", on_start.as_ref().unchecked_ref());
+    let _ = canvas.add_event_listener_with_callback("touchend", on_end.as_ref().unchecked_ref());
+    // Listening for the page's lifetime.
+    on_start.forget();
+    on_end.forget();
 }
 
 fn query() -> String {

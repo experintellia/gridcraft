@@ -48,6 +48,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                     let resp = child
                         .add(egui::Label::new(egui::RichText::new(text).font(theme::ui_font(13.0)).color(t.text)).truncate().sense(Sense::click()));
                     let click = child.interact(field, id.with("click"), Sense::click());
+                    crate::add_keyboard_zone(ui.ctx(), field);
                     if resp.clicked() || click.clicked() {
                         app.begin_edit(None, true);
                     }
@@ -290,6 +291,17 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
         .event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
         .show(ui);
     let resp = output.response.clone();
+    // The TextEdit takes focus a frame late: keep the platform text input (the on-screen keyboard) up meanwhile.
+    if mine && ui.ctx().output(|o| o.ime.is_none()) {
+        ui.ctx().output_mut(|o| {
+            o.ime = Some(egui::output::IMEOutput {
+                purpose: egui::IMEPurpose::Normal,
+                rect: resp.rect,
+                cursor_rect: resp.rect,
+                should_interrupt_composition: false,
+            })
+        });
+    }
     let synced = mine && (ed.request_focus || ed.sync_caret);
     if synced {
         if ed.request_focus {
