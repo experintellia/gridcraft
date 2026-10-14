@@ -34,6 +34,10 @@ const TAG_PRESENCE: u8 = 1;
 const PRESENCE_EVERY_MS: f64 = 100.0;
 const HEARTBEAT_MS: f64 = 5_000.0;
 const GONE_MS: f64 = 15_000.0;
+/// Caps on what one member's presence can make every frame draw.
+const MAX_PEERS: usize = 50;
+const MAX_NAME: usize = 40;
+const MAX_RANGES: usize = 64;
 
 /// Where a member is: the shared workbook's sheet and their selection.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -175,7 +179,8 @@ impl Webxdc {
         let dropped = std::mem::take(&mut *self.dropped.lock().unwrap_or_else(|e| e.into_inner()));
         let mut files = std::mem::take(&mut *inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for (name, bytes) in dropped {
-            if self.collab.is_empty() {
+            // Before the chat's updates are in, a workbook may well exist: ask.
+            if self.collab.is_empty() && self.replayed.get() {
                 files.push((name, bytes));
             } else {
                 app.open_dialog("replaceWorkbook", serde_json::json!({"name": name, "base64": base64_encode(&bytes)}));
@@ -208,8 +213,10 @@ impl Webxdc {
     /// The start screen shows while nobody has started the shared workbook; a blank one chosen
     /// there starts it for everyone.
     fn start(&mut self, app: &mut SheetApp) {
-        app.start = if !self.collab.is_empty() || !self.replayed.get() {
+        app.start = if !self.collab.is_empty() {
             Start::Off
+        } else if !self.replayed.get() {
+            Start::Loading
         } else if app.start == Start::Blank {
             if let Some(update) = self.collab.create(&mut app.session) {
                 self.send(&update);
@@ -224,7 +231,11 @@ impl Webxdc {
     fn hear(&mut self, app: &mut SheetApp) {
         let now = js_sys::Date::now();
         for presence in std::mem::take(&mut *self.heard.borrow_mut()) {
-            if presence.id != self.me {
+            // Hostile input: bound what one member can make every frame draw.
+            if presence.id != self.me && (self.peers.len() < MAX_PEERS || self.peers.contains_key(&presence.id)) {
+                let mut presence = presence;
+                presence.name = presence.name.chars().take(MAX_NAME).collect();
+                presence.sel.ranges.truncate(MAX_RANGES);
                 self.announce |= !self.peers.contains_key(&presence.id);
                 self.peers.insert(presence.id.clone(), (presence, now));
             }

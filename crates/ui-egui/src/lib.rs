@@ -228,6 +228,9 @@ pub enum Start {
     Shown,
     /// The user chose a blank workbook: the host creates it and turns the screen off.
     Blank,
+    /// The host is still loading the document (webxdc: the messenger is replaying the chat's
+    /// updates); nothing to show or edit yet.
+    Loading,
 }
 
 /// A collaborator looking at a document: the grid outlines their selection in their colour and
@@ -1177,11 +1180,17 @@ impl SheetApp {
         i18n::set_current(&ctx, self.ui.language);
         let t = theme::Tokens::get(&ctx);
         let start = self.start == Start::Shown;
-        if self.backstage.is_none() && !start {
+        let loading = self.start == Start::Loading;
+        if self.backstage.is_none() && !start && !loading {
             self.ribbon_keys(&ctx);
         }
-        ribbon::title_bar(self, ui);
-        if start {
+        // The title bar's Save, Share and search act on a document; there is none yet.
+        if !start && !loading {
+            ribbon::title_bar(self, ui);
+        }
+        if loading {
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.grid_bg)).show(ui, |_| {});
+        } else if start {
             backstage::start(self, ui);
         } else if self.backstage.is_some() {
             // File tab: the Backstage view replaces everything below the title bar.

@@ -20,7 +20,7 @@ fi
 cp -f "$ROOT/assets/app-icon/gridcraft-macos-512.png" "$SITE/icon.png"
 cat > "$SITE/manifest.toml" <<TOML
 name = "GridCraft"
-source_code_url = "https://github.com/storytold/gridcraft"
+source_code_url = "https://github.com/experintellia/gridcraft"
 TOML
 copy_docs "$SITE"
 OUT="$DIST/gridcraft-$VERSION.xdc"

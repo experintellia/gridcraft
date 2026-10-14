@@ -1705,7 +1705,10 @@ fn paint_peers(p: &Painter, geo: &Geo, sh: &Sheet, app: &SheetApp, rows: (u32, u
             let cell = geo.cell_rect(sh, peer.selection.active);
             p.rect_stroke(cell, 0.0, Stroke::new(2.0, col), StrokeKind::Inside);
             let galley = p.layout_no_wrap(peer.name.clone(), theme::ui_font(11.0), Color32::WHITE);
-            let tag = Rect::from_min_size(cell.left_top() - vec2(0.0, galley.size().y + 2.0), galley.size() + vec2(6.0, 2.0));
+            let size = galley.size() + vec2(6.0, 2.0);
+            // Above the cell, or below it where the pane's top edge would cut it off (row 1).
+            let above = cell.left_top() - vec2(0.0, size.y);
+            let tag = Rect::from_min_size(if above.y < p.clip_rect().top() { cell.left_bottom() } else { above }, size);
             p.rect_filled(tag, 2.0, col);
             p.galley(tag.min + vec2(3.0, 1.0), galley, Color32::WHITE);
         }

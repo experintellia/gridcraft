@@ -17,6 +17,8 @@ concurrency:
 
 jobs:
   xdc:
+    # A manual run releases only from the webxdc branch, never from an unreviewed branch.
+    if: github.ref_type == 'tag' || github.ref == 'refs/heads/webxdc'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
