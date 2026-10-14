@@ -99,6 +99,7 @@ fn keyboard_on_tap(ctx: egui::Context) {
     let touch_screen = web_sys::window().and_then(|w| w.match_media("(pointer: coarse)").ok().flatten()).is_some_and(|m| m.matches());
     if touch_screen {
         ctx.on_end_pass("gridcraft.cell_input", std::sync::Arc::new(|ui: &mut egui::Ui| place_cell_input(ui.ctx())));
+        unpan_after_keyboard();
     }
     // Where and when the touch began, and whether a second finger joined it.
     let start = std::rc::Rc::new(std::cell::Cell::new((0, 0, 0.0, false)));
@@ -139,6 +140,32 @@ fn keyboard_on_tap(ctx: egui::Context) {
     // Listening for the page's lifetime.
     on_start.forget();
     on_end.forget();
+}
+
+/// iOS pans the page to keep a natively focused text input above the keyboard, and doesn't always pan back once the
+/// keyboard hides: the canvas stays pushed up with the page background below it. The page itself never scrolls, so
+/// any pan left once no text input has focus is undone.
+fn unpan_after_keyboard() {
+    let Some(window) = web_sys::window() else { return };
+    let unpan = Closure::<dyn FnMut()>::new(|| {
+        let Some(w) = web_sys::window() else { return };
+        let typing = w.document().and_then(|d| d.active_element()).is_some_and(|el| el.dyn_ref::<web_sys::HtmlInputElement>().is_some());
+        if !typing && (w.scroll_x().unwrap_or(0.0) != 0.0 || w.scroll_y().unwrap_or(0.0) != 0.0) {
+            w.scroll_to_with_x_and_y(0.0, 0.0);
+        }
+    });
+    let f = unpan.as_ref().unchecked_ref();
+    let _ = window.add_event_listener_with_callback("scroll", f);
+    // The keyboard hiding resizes the visual viewport, also when the pan itself fired no scroll event.
+    if let Some(vv) = window.visual_viewport() {
+        let _ = vv.add_event_listener_with_callback("resize", f);
+        let _ = vv.add_event_listener_with_callback("scroll", f);
+    }
+    if let Some(document) = window.document() {
+        let _ = document.add_event_listener_with_callback("focusout", f);
+    }
+    // Listening for the page's lifetime.
+    unpan.forget();
 }
 
 /// The canvas, and eframe's text input (which eframe puts right after it).
