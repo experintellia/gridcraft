@@ -44,6 +44,8 @@ const SNAPSHOT_EVERY: usize = 16;
 const SNAPSHOTS: usize = 16;
 /// Deepest path a patch may have; a remote op with a deeper one is refused.
 const MAX_PATH: usize = 32;
+/// Longest document title a remote `file.open` may set.
+const MAX_TITLE: usize = 255;
 
 #[derive(Serialize, Deserialize)]
 struct Op {
@@ -345,6 +347,12 @@ fn replay(s: &mut Session, json: &str) {
     match op.wb {
         // As `Session::execute` records an undoable command.
         Some(wb) => {
+            // Everyone's title is the opened file's name (hostile input: a bare, bounded name).
+            if op.c == "file.open"
+                && let Some(name) = op.p.get("name").and_then(Json::as_str).and_then(|n| std::path::Path::new(n).file_name())
+            {
+                d.title = name.to_string_lossy().chars().take(MAX_TITLE).collect();
+            }
             d.undo.push(HistoryEntry { label: op.c, wb: d.wb.clone(), selection: d.selection.clone() });
             if d.undo.len() > UNDO_LIMIT {
                 d.undo.remove(0);
@@ -768,6 +776,8 @@ mod tests {
         assert_eq!(b.0.active().unwrap().wb.sheets.len(), 2);
         assert_eq!(b.0.active().unwrap().uid, b.1.doc());
         assert_eq!(workbook(&a.0), workbook(&b.0));
+        assert_eq!(a.0.active().unwrap().display_title(), "data.xlsx");
+        assert_eq!(b.0.active().unwrap().display_title(), "data.xlsx");
     }
 
     #[test]
