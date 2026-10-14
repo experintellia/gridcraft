@@ -26,14 +26,13 @@ pub fn start() {
         // workbooks in it and stores what it saves (`host`).
         let bridge = if query_param("host").as_deref() == Some("parent") { crate::host::Bridge::new() } else { None };
         let app_bridge = bridge.clone();
-        let tap_target = canvas.clone();
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
                 options,
                 Box::new(move |cc| {
                     crate::perf::mark("WebGL2 context ready");
-                    keyboard_on_tap(&tap_target, cc.egui_ctx.clone());
+                    keyboard_on_tap(cc.egui_ctx.clone());
                     let inbox: Inbox = Inbox::default();
                     let mut session = Session::new();
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone());
@@ -90,10 +89,17 @@ pub fn start() {
     });
 }
 
-/// iOS opens the on-screen keyboard only for an input focused inside a touch handler, and eframe focuses its text
-/// input a frame later. So a tap on a [`gridcraft_ui_egui::keyboard_zones`] rect (the active cell, the formula bar)
-/// focuses that input right away; eframe takes the focus back if the frame starts no editing.
-fn keyboard_on_tap(canvas: &web_sys::HtmlCanvasElement, ctx: egui::Context) {
+/// iOS opens the on-screen keyboard only for a text field focused inside a touch handler, and eframe focuses its text
+/// input a frame later. So on touch screens eframe's (transparent) text input lies over the active cell, where a tap
+/// focuses it natively and edits the cell ([`gridcraft_ui_egui::cell_zone`]); a tap on another
+/// [`gridcraft_ui_egui::keyboard_zones`] rect (the formula bar) focuses it from the touch handler. eframe takes the
+/// focus back if the frame starts no editing.
+fn keyboard_on_tap(ctx: egui::Context) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
+    let touch_screen = web_sys::window().and_then(|w| w.match_media("(pointer: coarse)").ok().flatten()).is_some_and(|m| m.matches());
+    if touch_screen {
+        ctx.on_end_pass("gridcraft.cell_input", std::sync::Arc::new(|ui: &mut egui::Ui| place_cell_input(ui.ctx())));
+    }
     // Where and when the touch began, and whether a second finger joined it.
     let start = std::rc::Rc::new(std::cell::Cell::new((0, 0, 0.0, false)));
     let start_set = start.clone();
@@ -102,7 +108,6 @@ fn keyboard_on_tap(canvas: &web_sys::HtmlCanvasElement, ctx: egui::Context) {
             start_set.set((t.client_x(), t.client_y(), e.time_stamp(), e.touches().length() > 1));
         }
     });
-    let target = canvas.clone();
     let on_end = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(move |e: web_sys::TouchEvent| {
         // One finger, lifted soon and near where it went down: a tap, not a scroll, a pinch or a long press.
         let Some(t) = e.changed_touches().get(0).filter(|_| e.touches().length() == 0) else { return };
@@ -110,23 +115,55 @@ fn keyboard_on_tap(canvas: &web_sys::HtmlCanvasElement, ctx: egui::Context) {
         if multi || e.time_stamp() - at > 500.0 || (t.client_x() - x).abs() > 10 || (t.client_y() - y).abs() > 10 {
             return;
         }
-        let r = target.get_bounding_client_rect();
+        let Some((canvas, input)) = canvas_and_input() else { return };
+        let target = e.target();
+        if target.as_ref() == Some(input.as_ref()) {
+            gridcraft_ui_egui::tap_cell_zone(&ctx);
+            return;
+        }
+        if target.as_ref() != Some(canvas.as_ref()) {
+            return;
+        }
+        let r = canvas.get_bounding_client_rect();
         let zoom = ctx.zoom_factor();
         let p = egui::pos2((f64::from(t.client_x()) - r.left()) as f32 / zoom, (f64::from(t.client_y()) - r.top()) as f32 / zoom);
-        // eframe puts its text input right after the canvas.
-        if gridcraft_ui_egui::tap_opens_keyboard(&ctx, p)
-            && let Some(input) = target.next_element_sibling().and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-        {
+        if gridcraft_ui_egui::tap_opens_keyboard(&ctx, p) {
             let options = web_sys::FocusOptions::new();
             options.set_prevent_scroll(true);
             let _ = input.focus_with_options(&options);
         }
     });
-    let _ = canvas.add_event_listener_with_callback("touchstart", on_start.as_ref().unchecked_ref());
-    let _ = canvas.add_event_listener_with_callback("touchend", on_end.as_ref().unchecked_ref());
+    // Capturing: eframe stops touches on the canvas from bubbling.
+    let _ = document.add_event_listener_with_callback_and_bool("touchstart", on_start.as_ref().unchecked_ref(), true);
+    let _ = document.add_event_listener_with_callback_and_bool("touchend", on_end.as_ref().unchecked_ref(), true);
     // Listening for the page's lifetime.
     on_start.forget();
     on_end.forget();
+}
+
+/// The canvas, and eframe's text input (which eframe puts right after it).
+fn canvas_and_input() -> Option<(web_sys::HtmlCanvasElement, web_sys::HtmlInputElement)> {
+    let canvas = web_sys::window()?.document()?.get_element_by_id(CANVAS_ID)?.dyn_into::<web_sys::HtmlCanvasElement>().ok()?;
+    let input = canvas.next_element_sibling()?.dyn_into::<web_sys::HtmlInputElement>().ok()?;
+    Some((canvas, input))
+}
+
+/// Lays eframe's text input over the active cell while it takes typing; otherwise shrinks it back to the 1px field
+/// eframe moves to the text cursor.
+fn place_cell_input(ctx: &egui::Context) {
+    let Some((canvas, input)) = canvas_and_input() else { return };
+    let style = input.style();
+    let size = match gridcraft_ui_egui::cell_zone(ctx) {
+        Some(z) => {
+            let zoom = ctx.zoom_factor();
+            let _ = style.set_property("left", &format!("{}px", canvas.offset_left() as f32 + z.left() * zoom));
+            let _ = style.set_property("top", &format!("{}px", canvas.offset_top() as f32 + z.top() * zoom));
+            (z.width() * zoom, z.height() * zoom)
+        }
+        None => (1.0, 1.0),
+    };
+    let _ = style.set_property("width", &format!("{}px", size.0));
+    let _ = style.set_property("height", &format!("{}px", size.1));
 }
 
 fn query() -> String {

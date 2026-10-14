@@ -1157,7 +1157,10 @@ impl SheetApp {
     /// Lays out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        ctx.data_mut(|d| d.remove::<Vec<egui::Rect>>(egui::Id::new(KEYBOARD_ZONES)));
+        ctx.data_mut(|d| {
+            d.remove::<Vec<egui::Rect>>(egui::Id::new(KEYBOARD_ZONES));
+            d.remove::<egui::Rect>(egui::Id::new(CELL_ZONE));
+        });
         self.poll_printing(&ctx);
         if !self.fonts_ready || self.fonts_rebind {
             ctx.request_repaint();
@@ -1341,7 +1344,31 @@ pub(crate) fn keep_keyboard(ctx: &egui::Context, rect: egui::Rect) {
     });
 }
 
+/// The active cell's keyboard zone this frame, in points. iOS often keeps the keyboard down for a text field focused
+/// from script, even inside a touch handler, but a tap on the field itself always opens it: so on touch screens the
+/// web shell lays its (transparent) text input over this rect, and reports a tap on it with [`tap_cell_zone`].
+pub fn cell_zone(ctx: &egui::Context) -> Option<egui::Rect> {
+    ctx.data(|d| d.get_temp(egui::Id::new(CELL_ZONE)))
+}
+
+/// The text input over [`cell_zone`] was tapped: the next frame edits the active cell.
+pub fn tap_cell_zone(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(CELL_TAPPED), true));
+    ctx.request_repaint();
+}
+
+/// Publishes the active cell's keyboard zone; true when its text input was tapped since the last frame.
+pub(crate) fn cell_keyboard_zone(ctx: &egui::Context, rect: egui::Rect) -> bool {
+    add_keyboard_zone(ctx, rect);
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::new(CELL_ZONE), rect);
+        d.remove_temp::<bool>(egui::Id::new(CELL_TAPPED)).is_some()
+    })
+}
+
 const KEYBOARD_ZONES: &str = "gridcraft.keyboard_zones";
+const CELL_ZONE: &str = "gridcraft.cell_zone";
+const CELL_TAPPED: &str = "gridcraft.cell_tapped";
 
 pub(crate) fn add_keyboard_zone(ctx: &egui::Context, rect: egui::Rect) {
     ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<egui::Rect>>(egui::Id::new(KEYBOARD_ZONES)).push(rect));

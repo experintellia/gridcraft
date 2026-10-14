@@ -98,3 +98,18 @@ fn a_mouse_click_on_the_active_cell_does_not_edit_even_after_a_touch() {
     h.step();
     assert!(h.state().editor.is_none());
 }
+
+#[test]
+fn a_tap_on_the_text_input_over_the_active_cell_edits_it() {
+    let mut h = harness();
+    let c3 = center(&h, CellRef::new(2, 2));
+    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_some_and(|z| z.contains(c3)), "the web shell's text input lies over C3");
+
+    gridcraft_ui_egui::tap_cell_zone(&h.ctx);
+    h.step();
+    assert_eq!(h.state().editor.as_ref().map(|e| e.cell), Some(CellRef::new(2, 2)));
+    assert!(ime(&h), "the keyboard stays up the frame editing starts");
+    h.step();
+    assert!(ime(&h));
+    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_none(), "while editing the input shrinks back to the text cursor");
+}

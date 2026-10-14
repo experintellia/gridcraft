@@ -2625,7 +2625,12 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
             Some(m) => geo.range_rect(sh, m),
             None => geo.cell_rect(sh, active),
         };
-        crate::add_keyboard_zone(ctx, geo.mirror_rect(rect.intersect(geo.cells)));
+        let zone = geo.mirror_rect(rect.intersect(geo.cells));
+        if crate::cell_keyboard_zone(ctx, zone) {
+            app.begin_edit(None, false);
+            crate::keep_keyboard(ctx, zone);
+            return;
+        }
     }
     // The grid owns arrows, Tab and Escape (egui would otherwise move focus between widgets).
     ctx.memory_mut(|m| {

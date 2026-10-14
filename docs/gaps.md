@@ -161,7 +161,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 23. Mobile (platform)
 - No iOS, iPadOS or Android layout. The web build can type on phones: tapping the active cell or the formula bar
-  edits with the on-screen keyboard. **Estimate:** 30–60 h.
+  edits with the on-screen keyboard. On a phone-width screen the formula bar's text field is squeezed out (only
+  the name box and ×/✓ show). **Estimate:** 30–60 h.
 
 ### 24. Fonts and look (U)
 - Font weights beyond regular/bold (#168), system font list (#4), Calibri metrics (#29), macOS
