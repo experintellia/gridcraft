@@ -1014,11 +1014,14 @@ fn options(app: &mut SheetApp, ui: &mut Ui) {
     if ui.checkbox(&mut autocomplete, lang.tr("Enable AutoComplete for cell values")).changed() {
         app.run_or_alert("options.autoComplete", json!({"on": autocomplete}));
     }
-    ui.add_space(18.0);
-    section(ui, lang, "Options|Save");
-    let mut autosave = app.grid.autosave();
-    if ui.checkbox(&mut autosave, lang.tr("Save .xlsx workbooks automatically after every change")).changed() {
-        app.grid.toggle_autosave();
+    // AutoSave needs a file to save to; the web has none (see the title bar's toggle).
+    if cfg!(not(target_arch = "wasm32")) {
+        ui.add_space(18.0);
+        section(ui, lang, "Options|Save");
+        let mut autosave = app.grid.autosave();
+        if ui.checkbox(&mut autosave, lang.tr("Save .xlsx workbooks automatically after every change")).changed() {
+            app.grid.toggle_autosave();
+        }
     }
     let Some(calc) = app.session.active().map(|d| d.wb.calc.clone()) else { return };
     ui.add_space(18.0);
