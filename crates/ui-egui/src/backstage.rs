@@ -104,6 +104,8 @@ pub struct Backstage {
     pub page: Page,
     /// Info: property drafts while a field is being edited (committed when it loses focus).
     props: [String; 6],
+    /// Info: the workbook's name while it is being edited (`file.rename`, on losing focus).
+    name: String,
     /// Print: the whole workbook rather than the active sheet.
     pub print_all: bool,
     /// Print: fit each sheet on one page.
@@ -128,6 +130,7 @@ impl Backstage {
         Backstage {
             page,
             props: Default::default(),
+            name: String::new(),
             print_all: false,
             fit_to_page: false,
             preview_page: 0,
@@ -632,7 +635,19 @@ fn info(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage) {
         icons::paint(ui.painter(), Rect::from_min_size(ui.cursor().min, vec2(28.0, 28.0)), Icon::Book, t.text);
         ui.add_space(38.0);
         ui.vertical(|ui| {
-            ui.label(RichText::new(&title).font(theme::ui_bold(16.0)).color(t.text));
+            // A workbook with no file yet can be renamed here; a saved one by Save As.
+            if path.is_none() {
+                let id = ui.make_persistent_id("backstage_name");
+                if !ui.ctx().memory(|m| m.has_focus(id)) {
+                    bs.name.clone_from(&title);
+                }
+                let resp = ui.add(egui::TextEdit::singleline(&mut bs.name).id(id).font(theme::ui_bold(16.0)).text_color(t.text).desired_width(360.0));
+                if resp.lost_focus() && !bs.name.trim().is_empty() && bs.name.trim() != title {
+                    app.run_or_alert("file.rename", json!({"name": bs.name.clone()}));
+                }
+            } else {
+                ui.label(RichText::new(&title).font(theme::ui_bold(16.0)).color(t.text));
+            }
             match &path {
                 Some(p) => dim(ui, p),
                 None => dim(ui, lang.tr("Not saved yet")),

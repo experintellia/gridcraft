@@ -3282,3 +3282,18 @@ fn paste_special_validation_moves_relative_references() {
     assert!(!ok(&mut s, "C3", "5"), "the pasted rule checks C3, not A1");
     assert!(ok(&mut s, "C3", "20"));
 }
+
+#[test]
+fn rename_titles_an_unsaved_workbook() {
+    let mut s = s();
+    s.execute("file.rename", json!({"name": " Budget 2026 "})).unwrap();
+    assert_eq!(s.doc().unwrap().display_title(), "Budget 2026");
+    let saved = s.execute("file.saveBytes", json!({"format": "xlsx"})).unwrap();
+    assert_eq!(saved["name"], "Budget 2026.xlsx");
+    for bad in ["", "  ", "a/b", "a\\b", "a\nb", &"x".repeat(256)] {
+        assert!(s.execute("file.rename", json!({"name": bad})).is_err(), "{bad:?}");
+    }
+    assert_eq!(s.doc().unwrap().display_title(), "Budget 2026");
+    s.active_mut().unwrap().path = Some("/tmp/book.xlsx".into());
+    assert!(s.execute("file.rename", json!({"name": "Other"})).is_err());
+}

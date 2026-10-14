@@ -15,6 +15,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "file.close", "Close", ["File"], Some("Cmd+W"), "{force?: bool}", has_doc, close),
         cmd!(noundo "file.exportCsv", "Export as CSV", ["File", "Export"], None, "{path, sheet?}", has_doc, |s, p| export(s, p, "csv")),
         cmd!(noundo "file.exportHtml", "Save as Web Page", ["File", "Export"], None, "{path}", has_doc, |s, p| export(s, p, "html")),
+        cmd!(noundo "file.rename", "Rename", ["File"], None, "{name} (a workbook not saved to a file: its title, and the name Save suggests)", has_doc, rename),
         cmd!("file.properties", "Properties", ["File"], None, "{title?, subject?, author?, company?, keywords?, description?}", has_doc, properties),
         cmd!(
             query "file.options",
@@ -154,6 +155,22 @@ fn close(s: &mut Session, p: &Json) -> Result<Json> {
     let i = s.active_index();
     s.close_document(i);
     Ok(json!({"closed": true}))
+}
+
+/// Longest name `file.rename` takes.
+const MAX_NAME: usize = 255;
+
+fn rename(s: &mut Session, p: &Json) -> Result<Json> {
+    let name = str_param(p, "name").map(str::trim).ok_or_else(|| bad("file.rename", "missing `name`"))?;
+    if name.is_empty() || name.chars().count() > MAX_NAME || name.chars().any(|c| c.is_control() || matches!(c, '/' | '\\')) {
+        return Err(bad("file.rename", format!("a name is 1 to {MAX_NAME} characters, without / or \\")));
+    }
+    let d = s.active_mut().ok_or(crate::EngineError::NoDocument)?;
+    if d.path.is_some() {
+        return Err(bad("file.rename", "the workbook is saved to a file: use Save As to give it another name"));
+    }
+    d.title = name.to_string();
+    Ok(json!({"title": d.display_title()}))
 }
 
 fn export(s: &mut Session, p: &Json, ext: &str) -> Result<Json> {
