@@ -54,7 +54,7 @@ including tests, 2026-10-10.
 ## Platforms and builds
 
 macOS universal, Windows x64/x86/arm64, Linux x86_64/aarch64/riscv64 (AppImage, Flatpak, deb,
-rpm, tarball), FreeBSD, and web (WASM; WebGPU or WebGL2). Release workflows in
+rpm, tarball), FreeBSD, and web (WASM; WebGL2). Release workflows in
 `.github/workflows/release.yml`; see [`releasing.md`](releasing.md).
 
 ## Known architectural gaps
