@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use gridcraft_engine::core::{CellRef, MAX_COLS, MAX_ROWS, Value};
 use gridcraft_engine::model::{CellStore, Workbook};
-use gridcraft_engine::{DocState, HistoryEntry, Selection, Session, UNDO_LIMIT};
+use gridcraft_engine::{DocState, HistoryEntry, Selection, Session, UNDO_LIMIT, find_command};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 use yrs::updates::decoder::Decode as _;
@@ -319,8 +319,15 @@ fn replay(s: &mut Session, json: &str) {
     if op.c == NEW && op.wb.is_none() {
         return;
     }
+    // Hostile input: only what this host records (undoable commands, or a workbook or patches it
+    // carries), on a sheet that still exists, with a selection inside the grid.
+    let runs = op.wb.as_ref().map_or(!op.d.is_empty() || find_command(&op.c).is_some_and(|c| c.undoable), |wb| !wb.sheets.is_empty());
     let Some(d) = s.active_mut() else { return };
-    if op.s < d.wb.sheets.len() && d.wb.active_sheet != op.s {
+    if !runs || op.s >= d.wb.sheets.len() || !valid(&op.sel) {
+        log::warn!("skipped a shared `{}` this app can't run", op.c);
+        return;
+    }
+    if d.wb.active_sheet != op.s {
         Arc::make_mut(&mut d.wb).active_sheet = op.s;
     }
     d.selection = op.sel;
@@ -343,8 +350,10 @@ fn replay(s: &mut Session, json: &str) {
                 d.undo.remove(0);
             }
             d.redo.clear();
+            let mut wb = wb;
+            // Spilled values aren't stored: recalculate them.
+            d.calc.recalc_all(&mut wb);
             d.wb = Arc::new(wb);
-            d.calc.rebuild(&d.wb);
             d.revision += 1;
         }
         None => {
@@ -354,6 +363,15 @@ fn replay(s: &mut Session, json: &str) {
             }
         }
     }
+}
+
+/// A selection inside the grid: some ranges, each ordered, and the active cell and anchor in it.
+pub fn valid(sel: &Selection) -> bool {
+    let cell = |c: &CellRef| c.row < MAX_ROWS && c.col < MAX_COLS;
+    !sel.ranges.is_empty()
+        && cell(&sel.active)
+        && cell(&sel.anchor)
+        && sel.ranges.iter().all(|r| cell(&r.end) && r.start.row <= r.end.row && r.start.col <= r.end.col)
 }
 
 fn push(steps: &mut Vec<Step>, step: Step) {
@@ -714,6 +732,30 @@ mod tests {
         assert!(patched(&wb, &[bad]).is_none());
         let wrong_type = Patch { p: vec![json!("sheets"), json!(0), json!("name")], f: Some([json!("Sheet1")]), t: Some([json!(3)]) };
         assert!(patched(&wb, &[wrong_type]).is_none());
+    }
+
+    #[test]
+    fn hostile_ops_are_skipped() {
+        let (mut evil, mut b) = (peer(1), peer(2));
+        let sel = json!({"active": {"row": 0, "col": 0}, "anchor": {"row": 0, "col": 0}, "ranges": [{"start": {"row": 0, "col": 0}, "end": {"row": 0, "col": 0}}]});
+        let reversed = json!({"active": {"row": 0, "col": 0}, "anchor": {"row": 0, "col": 0}, "ranges": [{"start": {"row": 4_000_000_000u32, "col": 0}, "end": {"row": 2, "col": 0}}]});
+        let ops: Vec<Arc<str>> = [
+            json!({"c": "file.close", "p": {"force": true}, "s": 0, "sel": sel}),
+            json!({"c": "view.newWindow", "s": 0, "sel": sel}),
+            json!({"c": "home.bold", "s": 0, "sel": reversed}),
+            json!({"c": "cell.set", "p": {"cell": "A1", "input": "elsewhere"}, "s": 9, "sel": sel}),
+            json!({"c": "cell.set", "p": {"cell": "A1", "input": "fine"}, "s": 0, "sel": sel}),
+        ]
+        .iter()
+        .map(|op| op.to_string().into())
+        .collect();
+        let update = evil.1.append(&ops);
+        b.1.remote(&mut b.0, vec![update]);
+        assert_eq!(b.0.documents().len(), 1);
+        assert_eq!(b.0.active().unwrap().uid, b.1.doc());
+        assert_eq!(value(&mut b.0, "A1"), json!("fine"));
+        // The engine refuses other documents at any depth, too.
+        assert!(b.0.execute("file.close", json!({"force": true})).is_err());
     }
 
     #[test]

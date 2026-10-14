@@ -345,6 +345,10 @@ impl Session {
     /// Panics inside commands are caught and reported; the workbook is restored.
     pub fn execute(&mut self, id: &str, params: Json) -> Result<Json> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        // At any depth (scripts too): the host's one document is all there is.
+        if self.host_undo.is_some() && OTHER_DOCUMENTS.contains(&id) {
+            return Err(EngineError::Disabled(id.to_string(), "this workbook is the only one here".into()));
+        }
         if let Err(why) = (spec.enabled)(self) {
             return Err(EngineError::Disabled(id.to_string(), why));
         }
@@ -428,6 +432,20 @@ impl Session {
         r
     }
 }
+
+/// Commands that open, make, close or switch documents, which a host with one shared document
+/// ([`Session::host_undo`]) refuses.
+pub const OTHER_DOCUMENTS: &[&str] = &[
+    "file.new",
+    "file.open",
+    "file.close",
+    "window.activate",
+    "view.newWindow",
+    "view.arrangeAll",
+    "view.hideWindow",
+    "view.unhideWindow",
+    "view.switchWindows",
+];
 
 /// Convenience: the active workbook's active sheet.
 pub fn active_sheet(s: &Session) -> Option<&gridcraft_model::Sheet> {

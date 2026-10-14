@@ -202,19 +202,7 @@ pub struct Services {
     pub single_document: bool,
 }
 
-/// Commands that open, make, close or switch documents, which a [`Services::single_document`]
-/// host leaves out.
-pub const OTHER_DOCUMENTS: &[&str] = &[
-    "file.new",
-    "file.open",
-    "file.close",
-    "window.activate",
-    "view.newWindow",
-    "view.arrangeAll",
-    "view.hideWindow",
-    "view.unhideWindow",
-    "view.switchWindows",
-];
+pub use gridcraft_engine::OTHER_DOCUMENTS;
 
 /// The start screen of a host whose one document may not exist yet (webxdc: a chat nobody has
 /// started a workbook in).

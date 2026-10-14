@@ -232,7 +232,10 @@ impl Webxdc {
         let now = js_sys::Date::now();
         for presence in std::mem::take(&mut *self.heard.borrow_mut()) {
             // Hostile input: bound what one member can make every frame draw.
-            if presence.id != self.me && (self.peers.len() < MAX_PEERS || self.peers.contains_key(&presence.id)) {
+            if presence.id != self.me
+                && crate::collab::valid(&presence.sel)
+                && (self.peers.len() < MAX_PEERS || self.peers.contains_key(&presence.id))
+            {
                 let mut presence = presence;
                 presence.name = presence.name.chars().take(MAX_NAME).collect();
                 presence.sel.ranges.truncate(MAX_RANGES);
