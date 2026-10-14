@@ -187,10 +187,12 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
             if nav_item(ui, Page::Info.icon(), lang.tr("Info"), bs.page == Page::Info, nav_text, nav_sel).clicked() {
                 out.page = Some(Page::Info);
             }
-            if nav_item(ui, Icon::Save, lang.tr("Save"), false, nav_text, nav_sel).clicked() {
+            // The shared workbook has no file of its own to save to (Save would only lead to Save
+            // As, which hands a copy to the chat) and its host can't print.
+            if !single && nav_item(ui, Icon::Save, lang.tr("Save"), false, nav_text, nav_sel).clicked() {
                 save(app, &mut out);
             }
-            for page in [Page::SaveAs, Page::Print, Page::Export] {
+            for page in [Page::SaveAs, Page::Print, Page::Export].into_iter().filter(|&p| !(single && p == Page::Print)) {
                 if nav_item(ui, page.icon(), lang.tr(page.label()), bs.page == page, nav_text, nav_sel).clicked() {
                     out.page = Some(page);
                 }

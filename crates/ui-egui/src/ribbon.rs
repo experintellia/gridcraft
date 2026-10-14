@@ -114,7 +114,7 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
                         app.run_or_alert(id, json!({}));
                     }
                 }
-                if ui.button("Print…").clicked() {
+                if !app.services.single_document && ui.button("Print…").clicked() {
                     app.print_now(json!({}));
                 }
             });
@@ -179,53 +179,59 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
             // Tabs row.
             let tabs_rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 32.0));
             ui.scope_builder(egui::UiBuilder::new().max_rect(tabs_rect), |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    ui.add_space(8.0);
-                    file_menu(app, ui);
-                    let mut tabs: Vec<&str> = TABS.to_vec();
-                    let ctx_tabs = contextual_tabs(app);
-                    tabs.extend(ctx_tabs.iter());
-                    for tab in tabs {
-                        let active = app.ui.ribbon_tab == tab;
-                        let contextual = ctx_tabs.contains(&tab);
-                        let font = theme::ui_font(13.5);
-                        let label = app.ui.language.tr(tab);
-                        let tw = ui.painter().layout_no_wrap(label.to_string(), font.clone(), t.text).size().x;
-                        let (r, resp) = ui.allocate_exact_size(vec2(tw + 22.0, 30.0), Sense::click());
-                        if resp.hovered() && !active {
-                            ui.painter().rect_filled(r.shrink2(vec2(2.0, 4.0)), 5.0, t.hover);
-                        }
-                        let color = if contextual {
-                            t.accent
-                        } else if active {
-                            t.text
-                        } else {
-                            t.text_dim
-                        };
-                        ui.painter().text(r.center(), Align2::CENTER_CENTER, label, if active { theme::ui_bold(13.5) } else { font }, color);
-                        if active {
-                            let ul = Rect::from_center_size(pos2(r.center().x, r.bottom() - 3.0), vec2(tw.clamp(20.0, 40.0), 3.0));
-                            ui.painter().rect_filled(ul, 1.5, t.accent);
-                        }
-                        if resp.clicked() {
-                            if active && !collapsed {
-                                app.ui.ribbon_collapsed = true;
-                            } else {
-                                app.ui.ribbon_tab = tab.to_string();
-                                app.ui.ribbon_collapsed = false;
+                // A phone is too narrow for all the tabs: they scroll sideways, like the ribbon below.
+                egui::ScrollArea::horizontal()
+                    .id_salt("ribbon_tabs")
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            ui.add_space(8.0);
+                            file_menu(app, ui);
+                            let mut tabs: Vec<&str> = TABS.to_vec();
+                            let ctx_tabs = contextual_tabs(app);
+                            tabs.extend(ctx_tabs.iter());
+                            for tab in tabs {
+                                let active = app.ui.ribbon_tab == tab;
+                                let contextual = ctx_tabs.contains(&tab);
+                                let font = theme::ui_font(13.5);
+                                let label = app.ui.language.tr(tab);
+                                let tw = ui.painter().layout_no_wrap(label.to_string(), font.clone(), t.text).size().x;
+                                let (r, resp) = ui.allocate_exact_size(vec2(tw + 22.0, 30.0), Sense::click());
+                                if resp.hovered() && !active {
+                                    ui.painter().rect_filled(r.shrink2(vec2(2.0, 4.0)), 5.0, t.hover);
+                                }
+                                let color = if contextual {
+                                    t.accent
+                                } else if active {
+                                    t.text
+                                } else {
+                                    t.text_dim
+                                };
+                                ui.painter().text(r.center(), Align2::CENTER_CENTER, label, if active { theme::ui_bold(13.5) } else { font }, color);
+                                if active {
+                                    let ul = Rect::from_center_size(pos2(r.center().x, r.bottom() - 3.0), vec2(tw.clamp(20.0, 40.0), 3.0));
+                                    ui.painter().rect_filled(ul, 1.5, t.accent);
+                                }
+                                if resp.clicked() {
+                                    if active && !collapsed {
+                                        app.ui.ribbon_collapsed = true;
+                                    } else {
+                                        app.ui.ribbon_tab = tab.to_string();
+                                        app.ui.ribbon_collapsed = false;
+                                    }
+                                }
+                                if resp.double_clicked() {
+                                    app.ui.ribbon_collapsed = !collapsed;
+                                }
+                                if app.keytips.prefix() == Some("")
+                                    && let Some(sequence) = keytip_table::tab_sequence(tab)
+                                {
+                                    keytip(app, ui, sequence, pos2(r.center().x, r.bottom() - 1.0));
+                                }
                             }
-                        }
-                        if resp.double_clicked() {
-                            app.ui.ribbon_collapsed = !collapsed;
-                        }
-                        if app.keytips.prefix() == Some("")
-                            && let Some(sequence) = keytip_table::tab_sequence(tab)
-                        {
-                            keytip(app, ui, sequence, pos2(r.center().x, r.bottom() - 1.0));
-                        }
-                    }
-                });
+                        });
+                    });
             });
             if collapsed {
                 return;

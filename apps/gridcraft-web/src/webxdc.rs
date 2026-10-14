@@ -98,6 +98,8 @@ impl Webxdc {
             }
         }));
         services.open_url = None;
+        // The messenger's sandbox has no print dialog.
+        services.print = None;
         services.single_document = true;
         let me = Reflect::get(&api, &"selfAddr".into()).ok().and_then(|a| a.as_string()).unwrap_or_default();
         let named = collab.title(session);
