@@ -3282,3 +3282,28 @@ fn paste_special_validation_moves_relative_references() {
     assert!(!ok(&mut s, "C3", "5"), "the pasted rule checks C3, not A1");
     assert!(ok(&mut s, "C3", "20"));
 }
+
+#[test]
+fn rename_titles_an_unsaved_workbook() {
+    let mut s = s();
+    s.execute("file.rename", json!({"name": " Budget 2026 "})).unwrap();
+    assert_eq!(s.doc().unwrap().display_title(), "Budget 2026");
+    let saved = s.execute("file.saveBytes", json!({"format": "xlsx"})).unwrap();
+    assert_eq!(saved["name"], "Budget 2026.xlsx");
+    for bad in ["", "  ", "a/b", "a\\b", "a\nb", &"x".repeat(256)] {
+        assert!(s.execute("file.rename", json!({"name": bad})).is_err(), "{bad:?}");
+    }
+    assert_eq!(s.doc().unwrap().display_title(), "Budget 2026");
+    s.execute("file.rename", json!({"name": "Q3"})).unwrap();
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().display_title(), "Budget 2026");
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().display_title(), "Book1");
+    s.execute("edit.redo", json!({"steps": 2})).unwrap();
+    assert_eq!(s.doc().unwrap().display_title(), "Q3");
+    // Hostile input: a name the workbook carries counts only if `file.rename` would take it.
+    std::sync::Arc::make_mut(&mut s.active_mut().unwrap().wb).name = Some("../x".into());
+    assert_eq!(s.doc().unwrap().display_title(), "Book1");
+    s.active_mut().unwrap().path = Some("/tmp/book.xlsx".into());
+    assert!(s.execute("file.rename", json!({"name": "Other"})).is_err());
+}

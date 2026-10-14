@@ -2,8 +2,9 @@
 //! workbook ([`crate::collab`]). Edits travel as `sendUpdate` payloads `{y: <base64 Yjs update>}`,
 //! which the messenger stores and replays on every start, and also over the realtime channel
 //! where the messenger has one, so collaborators online at the same time see them at once.
-//! Opening a file replaces the shared workbook (after a warning, once there is one); Save and
-//! Export hand the file to the chat. The app is that one workbook: no New, Open, samples or window
+//! Opening a file replaces the shared workbook (after a warning, once there is one); its name,
+//! or one given on File › Info (`file.rename`), titles the workbook for everyone and names the
+//! instance in the chat (`sendUpdate`'s `document`). Save and Export hand the file to the chat. The app is that one workbook: no New, Open, samples or window
 //! commands ([`Services::single_document`]). Until someone starts it, a start screen offers a
 //! blank workbook or a file.
 //!
@@ -69,6 +70,8 @@ pub struct Webxdc {
     sent: Option<(Presence, f64)>,
     /// Someone new is here: tell them where this member is.
     announce: bool,
+    /// The workbook's name as last sent to the messenger.
+    named: String,
 }
 
 /// `window.webxdc`, when the page runs as a webxdc app (`webxdc.js` loaded).
@@ -97,7 +100,9 @@ impl Webxdc {
         services.open_url = None;
         services.single_document = true;
         let me = Reflect::get(&api, &"selfAddr".into()).ok().and_then(|a| a.as_string()).unwrap_or_default();
+        let named = collab.title(session);
         Some(Webxdc {
+            named,
             api,
             channel: None,
             collab,
@@ -199,7 +204,7 @@ impl Webxdc {
             match open_bytes(&name, &bytes) {
                 Ok((wb, _)) => {
                     if let Some(update) = self.collab.open(&mut app.session, &name, wb) {
-                        self.send(&update);
+                        self.send(&app.session, &update);
                     }
                     app.backstage = None;
                 }
@@ -213,7 +218,7 @@ impl Webxdc {
     /// After the frame: sends the edits made in it, and where this member is.
     pub fn after(&mut self, app: &mut SheetApp) {
         if let Some(update) = self.collab.local(&mut app.session) {
-            self.send(&update);
+            self.send(&app.session, &update);
         }
         self.start(app);
         self.tell(&app.session);
@@ -228,7 +233,7 @@ impl Webxdc {
             Start::Loading
         } else if app.start == Start::Blank {
             if let Some(update) = self.collab.create(&mut app.session) {
-                self.send(&update);
+                self.send(&app.session, &update);
             }
             Start::Off
         } else {
@@ -297,9 +302,18 @@ impl Webxdc {
         }
     }
 
-    fn send(&self, update: &[u8]) {
+    /// Sends `update`, and the workbook's name when it changed (opened or renamed): the messenger
+    /// shows it next to the app's (`document`; the latest one wins).
+    fn send(&mut self, s: &Session, update: &[u8]) {
         let payload = object(&[("y", base64_encode(update).into())]);
-        if let Err(e) = call(&self.api, "sendUpdate", &[object(&[("payload", payload)]), "".into()]) {
+        let mut fields = vec![("payload", payload)];
+        let title = self.collab.title(s);
+        if title != self.named {
+            self.named = title;
+            let stem = std::path::Path::new(&self.named).file_stem().map_or_else(|| self.named.clone(), |s| s.to_string_lossy().to_string());
+            fields.push(("document", stem.into()));
+        }
+        if let Err(e) = call(&self.api, "sendUpdate", &[object(&fields), "".into()]) {
             log::error!("couldn't share an edit: {e:?}");
         }
         if let Some(channel) = &self.channel

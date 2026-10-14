@@ -15,6 +15,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gridcraft_ui_egui::{Inbox, Services, SheetApp};
 use wasm_bindgen::JsCast as _;
@@ -86,10 +87,14 @@ impl Bridge {
         if let Some(name) = saved.iter().rev().find(|name| is_workbook(name))
             && let Some(doc) = app.session.active_mut()
         {
-            doc.saved = doc.wb.clone();
             if doc.path.is_none() {
+                // The name it was saved as replaces one given by `file.rename`.
                 doc.title = name.clone();
+                if doc.wb.name.is_some() {
+                    Arc::make_mut(&mut doc.wb).name = None;
+                }
             }
+            doc.saved = doc.wb.clone();
         }
         let dirty = app.session.documents().iter().any(|d| d.is_dirty());
         if self.reported.get() != Some(dirty) && self.send(&[("type", "gridcraft:dirty".into()), ("dirty", dirty.into())]) {

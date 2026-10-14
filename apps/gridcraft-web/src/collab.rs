@@ -116,6 +116,11 @@ impl Collab {
         self.uid
     }
 
+    /// The shared workbook's title: an opened file's name, or one given by `file.rename`.
+    pub fn title(&self, s: &Session) -> String {
+        s.documents().iter().find(|d| d.uid == self.uid).map(DocState::display_title).unwrap_or_default()
+    }
+
     /// Whether nobody has started the shared workbook: no ops yet.
     pub fn is_empty(&self) -> bool {
         self.applied.is_empty()
@@ -188,7 +193,9 @@ impl Collab {
     }
 
     /// Opens a workbook for everyone, replacing the shared one.
-    pub fn open(&mut self, s: &mut Session, name: &str, wb: Workbook) -> Option<Vec<u8>> {
+    pub fn open(&mut self, s: &mut Session, name: &str, mut wb: Workbook) -> Option<Vec<u8>> {
+        // Everyone's title is the file's name; undoing the open takes it back.
+        wb.name = std::path::Path::new(name).file_name().map(|n| n.to_string_lossy().to_string());
         let sel = Selection::at(wb.active().map(|sh| sh.view_active).unwrap_or_default());
         let before = s.documents().iter().find(|d| d.uid == self.uid)?.wb.clone();
         let after = Arc::new(wb.clone());
@@ -768,6 +775,37 @@ mod tests {
         assert_eq!(b.0.active().unwrap().wb.sheets.len(), 2);
         assert_eq!(b.0.active().unwrap().uid, b.1.doc());
         assert_eq!(workbook(&a.0), workbook(&b.0));
+        assert_eq!(a.0.active().unwrap().display_title(), "data.xlsx");
+        assert_eq!(b.0.active().unwrap().display_title(), "data.xlsx");
+        // Undoing the open takes its name back too.
+        run(&mut a.0, "edit.undo", json!({}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!((a.1.title(&a.0), b.1.title(&b.0)), ("Book1".into(), "Book1".into()));
+    }
+
+    #[test]
+    fn a_rename_reaches_everyone() {
+        let (mut a, mut b) = (peer(1), peer(2));
+        run(&mut a.0, "cell.set", json!({"cell": "A1", "input": "1"}));
+        run(&mut a.0, "file.rename", json!({"name": "Budget"}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!(b.0.active().unwrap().display_title(), "Budget");
+        assert_eq!((a.1.title(&a.0), b.1.title(&b.0)), ("Budget".into(), "Budget".into()));
+        assert_eq!(value(&mut b.0, "A1").as_f64(), Some(1.0));
+        // Alone, too: a rename is an op of its own.
+        run(&mut b.0, "file.rename", json!({"name": "Q3"}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!(a.0.active().unwrap().display_title(), "Q3");
+        // Undo takes back only b's own rename, for everyone.
+        run(&mut b.0, "edit.undo", json!({}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!((a.1.title(&a.0), b.1.title(&b.0)), ("Budget".into(), "Budget".into()));
+        // Hostile input: a name `file.rename` refuses leaves the title as it was.
+        let sel = json!({"active": {"row": 0, "col": 0}, "anchor": {"row": 0, "col": 0}, "ranges": [{"start": {"row": 0, "col": 0}, "end": {"row": 0, "col": 0}}]});
+        let op: Arc<str> = json!({"c": "file.rename", "p": {"name": "../../x"}, "s": 0, "sel": sel}).to_string().into();
+        let update = b.1.append(&[op]);
+        a.1.remote(&mut a.0, vec![update]);
+        assert_eq!(a.0.active().unwrap().display_title(), "Budget");
     }
 
     #[test]
