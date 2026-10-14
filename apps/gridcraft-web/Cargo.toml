@@ -1,6 +1,6 @@
 [package]
 name = "gridcraft-web"
-description = "GridCraft in the browser (eframe web runner, WebGPU with WebGL2 fallback)"
+description = "GridCraft in the browser (eframe web runner, WebGL2)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -24,9 +24,11 @@ serde = { workspace = true }
 yrs = "0.28"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+# glow (WebGL2), not wgpu: egui draws plain textured triangles, and wgpu's WebGPU setup and naga
+# shader translator made the module 3.3 MB bigger and the first frame ~30% later.
+eframe = { workspace = true, features = ["default_fonts", "glow", "accesskit"] }
 rfd = { workspace = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "HtmlIFrameElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Clipboard", "ClipboardItem", "Navigator", "MessageEvent", "UrlSearchParams"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "HtmlIFrameElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Clipboard", "ClipboardItem", "Navigator", "MessageEvent", "UrlSearchParams", "Performance", "PerformanceNavigationTiming", "PerformanceResourceTiming"] }

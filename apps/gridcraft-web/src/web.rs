@@ -10,6 +10,7 @@ const LOADING_ID: &str = "gridcraft_loading";
 
 pub fn start() {
     eframe::WebLogger::init(log::LevelFilter::Info).ok();
+    crate::perf::mark("wasm compiled and started");
     wasm_bindgen_futures::spawn_local(async {
         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
             log::error!("no document");
@@ -19,12 +20,7 @@ pub fn start() {
             log::error!("missing <canvas id=\"{CANVAS_ID}\">");
             return;
         };
-        let mut options = eframe::WebOptions::default();
-        if query().contains("webgl")
-            && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
-        {
-            create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
-        }
+        let options = eframe::WebOptions::default();
         // `?host=parent`: a same-origin page framing GridCraft (such as a Nextcloud app) opens
         // workbooks in it and stores what it saves (`host`).
         let bridge = if query_param("host").as_deref() == Some("parent") { crate::host::Bridge::new() } else { None };
@@ -34,6 +30,7 @@ pub fn start() {
                 canvas,
                 options,
                 Box::new(move |cc| {
+                    crate::perf::mark("WebGL2 context ready");
                     let inbox: Inbox = Inbox::default();
                     let mut session = Session::new();
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone());
@@ -49,7 +46,9 @@ pub fn start() {
                     if let Some(bridge) = &app_bridge {
                         bridge.connect(&mut services, inbox.clone(), cc.egui_ctx.clone());
                     }
+                    crate::perf::mark("session ready");
                     let mut app = SheetApp::new(session, services);
+                    crate::perf::mark("app ready");
                     app.ui.system_theme = true;
                     // Follow the browser's language, except a CJK one: the web build has no system
                     // CJK fonts (none are bundled), so that interface would render as tofu.
@@ -61,6 +60,7 @@ pub fn start() {
                         app.ui.language = browser;
                     }
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
+                    crate::perf::mark("fonts and language set up");
                     if let Some(bridge) = &app_bridge {
                         if let Some(author) = query_param("author") {
                             crate::host::Bridge::set_author(&mut app, &author);
@@ -69,8 +69,9 @@ pub fn start() {
                     }
                     if let Some(webxdc) = &mut webxdc {
                         webxdc.listen(cc.egui_ctx.clone());
+                        crate::perf::mark("listening for shared edits");
                     }
-                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, webxdc }))
+                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, webxdc, frames: 0, shown: None }))
                 }),
             )
             .await;
@@ -80,7 +81,7 @@ pub fn start() {
         if let Some(el) = document.get_element_by_id(LOADING_ID) {
             match result {
                 Ok(()) => el.remove(),
-                Err(e) => el.set_inner_html(&format!("<p>GridCraft failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>")),
+                Err(e) => el.set_inner_html(&format!("<p>GridCraft failed to start: {e:?}</p><p>A browser with WebGL2 is required.</p>")),
             }
         }
     });
@@ -99,10 +100,22 @@ struct WebShell {
     inbox: Inbox,
     bridge: Option<crate::host::Bridge>,
     webxdc: Option<crate::webxdc::Webxdc>,
+    /// Frames run, and the one that first showed the workbook or the start screen, for the
+    /// startup report ([`crate::perf`]).
+    frames: u64,
+    shown: Option<u64>,
 }
 
 impl eframe::App for WebShell {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.frames += 1;
+        if self.frames == 2 {
+            crate::perf::mark("first frame painted");
+        }
+        if self.shown.is_some_and(|f| self.frames == f + 1) {
+            crate::perf::mark("… and painted");
+            crate::perf::report();
+        }
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for f in dropped {
             // In a chat a dropped file replaces the workbook for everyone: webxdc asks first.
@@ -130,9 +143,22 @@ impl eframe::App for WebShell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.frames == 1 {
+            crate::perf::mark("first frame: input and shared edits handled");
+        }
         self.app.ui(ui);
+        if self.frames == 1 {
+            crate::perf::mark("first frame laid out");
+        }
         if let Some(webxdc) = &mut self.webxdc {
             webxdc.after(&mut self.app);
+        }
+        if self.shown.is_none() && self.app.start != gridcraft_ui_egui::Start::Loading {
+            self.shown = Some(self.frames);
+            let what = if self.app.start == gridcraft_ui_egui::Start::Off { "workbook" } else { "start screen" };
+            crate::perf::mark(format!("{what} laid out (frame {})", self.frames));
+            // Paint once more for the report even when nothing else asks for a frame.
+            ui.ctx().request_repaint();
         }
         if let Some(bridge) = &self.bridge {
             bridge.sync(&mut self.app);

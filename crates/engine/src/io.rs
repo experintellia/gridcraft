@@ -448,6 +448,18 @@ pub fn base64_encode(data: &[u8]) -> String {
     out
 }
 
+/// Each byte's value as a base64 digit, or [`INVALID`].
+const INVALID: u8 = 0xFF;
+const B64_VALUE: [u8; 256] = {
+    let mut t = [INVALID; 256];
+    let mut i = 0;
+    while i < 64 {
+        t[B64[i] as usize] = i as u8;
+        i += 1;
+    }
+    t
+};
+
 pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
     let s = s.split_once(',').filter(|(h, _)| h.starts_with("data:")).map(|(_, b)| b).unwrap_or(s);
     let mut out = Vec::with_capacity(s.len() / 4 * 3);
@@ -457,7 +469,11 @@ pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
         if c == b'=' || c.is_ascii_whitespace() {
             continue;
         }
-        let v = B64.iter().position(|&x| x == c)? as u32;
+        let v = B64_VALUE[c as usize];
+        if v == INVALID {
+            return None;
+        }
+        let v = v as u32;
         buf = (buf << 6) | v;
         bits += 6;
         if bits >= 8 {
@@ -499,6 +515,17 @@ pub fn image_size(data: &[u8]) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64_round_trips_every_byte_and_refuses_other_characters() {
+        let all: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
+        for n in 0..all.len() {
+            assert_eq!(base64_decode(&base64_encode(&all[..n])).as_deref(), Some(&all[..n]));
+        }
+        assert_eq!(base64_decode("data:text/plain;base64,aGk=\n").as_deref(), Some(&b"hi"[..]));
+        assert_eq!(base64_decode("aG-k"), None);
+        assert_eq!(base64_decode("aGé"), None);
+    }
 
     #[test]
     fn html_export_fails_instead_of_dropping_cells_past_the_row_limit() {

@@ -6,7 +6,7 @@
   <title>GridCraft</title>
   <!-- The webxdc API, provided by the messenger (never packaged). -->
   <script src="webxdc.js"></script>
-  <link data-trunk rel="rust" data-bin="gridcraft-web" data-wasm-opt="z" data-weak-refs />
+  <link data-trunk rel="rust" data-bin="gridcraft-web" data-cargo-profile="wasm-release" data-wasm-opt="z" data-weak-refs />
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #f3f3f3; }
     #gridcraft_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
