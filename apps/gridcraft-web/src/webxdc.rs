@@ -2,7 +2,8 @@
 //! workbook ([`crate::collab`]). Edits travel as `sendUpdate` payloads `{y: <base64 Yjs update>}`,
 //! which the messenger stores and replays on every start, and also over the realtime channel
 //! where the messenger has one, so collaborators online at the same time see them at once.
-//! Opening a file replaces the shared workbook (after a warning, once there is one); Save and
+//! Opening a file replaces the shared workbook (after a warning, once there is one) and names
+//! the instance in the chat after it (`sendUpdate`'s `document`); Save and
 //! Export hand the file to the chat. The app is that one workbook: no New, Open, samples or window
 //! commands ([`Services::single_document`]). Until someone starts it, a start screen offers a
 //! blank workbook or a file.
@@ -190,7 +191,9 @@ impl Webxdc {
             match open_bytes(&name, &bytes) {
                 Ok((wb, _)) => {
                     if let Some(update) = self.collab.open(&mut app.session, &name, wb) {
-                        self.send(&update);
+                        // The messenger shows the file's name next to the app's.
+                        let stem = std::path::Path::new(&name).file_stem().map(|s| s.to_string_lossy().to_string());
+                        self.send_with(&update, stem.as_deref());
                     }
                     app.backstage = None;
                 }
@@ -289,8 +292,17 @@ impl Webxdc {
     }
 
     fn send(&self, update: &[u8]) {
+        self.send_with(update, None);
+    }
+
+    /// Sends `update`; `document` names the webxdc instance in the chat (the latest one wins).
+    fn send_with(&self, update: &[u8], document: Option<&str>) {
         let payload = object(&[("y", base64_encode(update).into())]);
-        if let Err(e) = call(&self.api, "sendUpdate", &[object(&[("payload", payload)]), "".into()]) {
+        let mut fields = vec![("payload", payload)];
+        if let Some(document) = document {
+            fields.push(("document", document.into()));
+        }
+        if let Err(e) = call(&self.api, "sendUpdate", &[object(&fields), "".into()]) {
             log::error!("couldn't share an edit: {e:?}");
         }
         if let Some(channel) = &self.channel
