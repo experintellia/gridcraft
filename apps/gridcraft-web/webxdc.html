@@ -9,8 +9,8 @@
   <link data-trunk rel="rust" data-bin="gridcraft-web" data-cargo-profile="wasm-release" data-wasm-opt="z" data-weak-refs />
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #f3f3f3; }
-    /* No double-tap zoom: iOS ignores user-scalable=no and would take a tap that follows another (select a cell,
-       then tap it to type) as a double tap, so the keyboard needed a third tap. */
+    /* No double-tap zoom: iOS ignores user-scalable=no, and a double tap on the text input over the active cell
+       would zoom the page. */
     html { touch-action: manipulation; }
     #gridcraft_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
     #gridcraft_loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
