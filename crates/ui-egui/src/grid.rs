@@ -2133,6 +2133,20 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             app.begin_edit(None, false);
             return;
         }
+        // A finger tap on the active cell edits it, with the on-screen keyboard (`keyboard_zones`); checkboxes
+        // and links keep their tap.
+        let top_left = |x: CellRef| sh.merge_at(x).map_or(x, |m| m.start);
+        let finger = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Touch { phase: egui::TouchPhase::End, .. })));
+        if primary_clicked
+            && finger
+            && !mods.any()
+            && top_left(c) == top_left(sel.active)
+            && wb.styles.get(sh.style_id(c)).num_fmt.as_str() != "checkbox"
+            && !sh.hyperlinks.contains_key(&c)
+        {
+            app.begin_edit(None, false);
+            return;
+        }
         app.grid.last_click = Some((c, now));
         if mods.shift {
             let _ = app.session.run("selection.set", json!({"range": RangeRef::new(sel.anchor, c).a1(), "active": sel.active.a1()}));
@@ -2604,6 +2618,30 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
     }
     if ctx.memory(|m| m.focused()).is_none() {
         resp.request_focus();
+    }
+    // Typing (or a tap, on a touch screen) edits the active cell.
+    if let Some(active) = app.session.active().map(|d| d.selection.active) {
+        let rect = match sh.merge_at(active) {
+            Some(m) => geo.range_rect(sh, m),
+            None => geo.cell_rect(sh, active),
+        };
+        // Only where the cell shows: its own pane (not under frozen rows or columns, nor scrolled out of view),
+        // with no menu or popup over it, and clear of its edges (the fill handle, the move border). Checkboxes and
+        // links keep their tap.
+        let visible = geo
+            .range_panes(RangeRef::cell(active))
+            .into_iter()
+            .map(|pane| rect.intersect(pane).shrink(6.0))
+            .filter(|r| r.is_positive())
+            .max_by(|a, b| a.area().total_cmp(&b.area()))
+            .map(|r| geo.mirror_rect(r));
+        let covered = |z: Rect| egui::Popup::is_any_open(ctx) || !ctx.layer_id_at(z.center()).is_some_and(|l| l.order == egui::Order::Background);
+        let zone = visible.filter(|z| !covered(*z) && !is_checkbox(sh, app) && !sh.hyperlinks.contains_key(&active));
+        if crate::cell_keyboard_zone(ctx, zone) {
+            app.begin_edit(None, false);
+            crate::keep_keyboard(ctx, zone.unwrap_or_else(|| geo.mirror_rect(rect)));
+            return;
+        }
     }
     // The grid owns arrows, Tab and Escape (egui would otherwise move focus between widgets).
     ctx.memory_mut(|m| {

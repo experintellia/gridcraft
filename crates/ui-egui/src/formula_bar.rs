@@ -48,8 +48,11 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                     let resp = child
                         .add(egui::Label::new(egui::RichText::new(text).font(theme::ui_font(13.0)).color(t.text)).truncate().sense(Sense::click()));
                     let click = child.interact(field, id.with("click"), Sense::click());
+                    crate::add_keyboard_zone(ui.ctx(), field);
                     if resp.clicked() || click.clicked() {
                         app.begin_edit(None, true);
+                        // The editor is drawn from the next frame on.
+                        crate::keep_keyboard(ui.ctx(), field);
                     }
                 }
                 let _ = editing_here;
@@ -290,6 +293,9 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
         .event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
         .show(ui);
     let resp = output.response.clone();
+    if mine {
+        crate::keep_keyboard(ui.ctx(), resp.rect);
+    }
     let synced = mine && (ed.request_focus || ed.sync_caret);
     if synced {
         if ed.request_focus {

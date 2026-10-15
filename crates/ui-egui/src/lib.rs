@@ -1159,6 +1159,14 @@ impl SheetApp {
     /// Lays out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        ctx.data_mut(|d| {
+            d.remove::<Vec<egui::Rect>>(egui::Id::new(KEYBOARD_ZONES));
+            d.remove::<egui::Rect>(egui::Id::new(CELL_ZONE));
+            // A tap reported while editing (eframe focusing its input itself) must not edit again afterwards.
+            if self.editor.is_some() {
+                d.remove::<bool>(egui::Id::new(CELL_TAPPED));
+            }
+        });
         self.poll_printing(&ctx);
         if !self.fonts_ready || self.fonts_rebind {
             ctx.request_repaint();
@@ -1316,6 +1324,65 @@ pub fn clean_error(e: &str) -> String {
         return rest.to_string();
     }
     e.to_string()
+}
+
+/// Where a tap starts typing this frame (the active cell, the formula bar), in points. iOS opens the on-screen keyboard
+/// only for a text field focused inside the touch handler itself, so the web shell focuses its text input there.
+pub fn keyboard_zones(ctx: &egui::Context) -> Vec<egui::Rect> {
+    ctx.data(|d| d.get_temp(egui::Id::new(KEYBOARD_ZONES))).unwrap_or_default()
+}
+
+/// Whether a tap at `p` (points) starts typing: it hits a keyboard zone with no menu, popup or window over it.
+pub fn tap_opens_keyboard(ctx: &egui::Context, p: egui::Pos2) -> bool {
+    keyboard_zones(ctx).iter().any(|z| z.contains(p)) && ctx.layer_id_at(p).is_some_and(|l| l.order == egui::Order::Background)
+}
+
+/// Asks for the platform text input (the on-screen keyboard) at `rect` unless a focused text field already did:
+/// an editor's TextEdit takes focus a frame late, and the keyboard must not drop meanwhile.
+pub(crate) fn keep_keyboard(ctx: &egui::Context, rect: egui::Rect) {
+    ctx.output_mut(|o| {
+        o.ime.get_or_insert(egui::output::IMEOutput {
+            purpose: egui::IMEPurpose::Normal,
+            rect,
+            cursor_rect: rect,
+            should_interrupt_composition: false,
+        });
+    });
+}
+
+/// The active cell's keyboard zone this frame, in points. iOS often keeps the keyboard down for a text field focused
+/// from script, even inside a touch handler, but a tap on the field itself always opens it: so on touch screens the
+/// web shell lays its (transparent) text input over this rect, and reports a tap on it with [`tap_cell_zone`].
+pub fn cell_zone(ctx: &egui::Context) -> Option<egui::Rect> {
+    ctx.data(|d| d.get_temp(egui::Id::new(CELL_ZONE)))
+}
+
+/// The text input over [`cell_zone`] was tapped: the next frame edits the active cell.
+pub fn tap_cell_zone(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(CELL_TAPPED), true));
+    ctx.request_repaint();
+}
+
+/// Publishes the active cell's keyboard zone (none while the cell doesn't show or keeps its tap); true when its text
+/// input was tapped since the last frame.
+pub(crate) fn cell_keyboard_zone(ctx: &egui::Context, rect: Option<egui::Rect>) -> bool {
+    if let Some(rect) = rect {
+        add_keyboard_zone(ctx, rect);
+    }
+    ctx.data_mut(|d| {
+        if let Some(rect) = rect {
+            d.insert_temp(egui::Id::new(CELL_ZONE), rect);
+        }
+        d.remove_temp::<bool>(egui::Id::new(CELL_TAPPED)).is_some()
+    })
+}
+
+const KEYBOARD_ZONES: &str = "gridcraft.keyboard_zones";
+const CELL_ZONE: &str = "gridcraft.cell_zone";
+const CELL_TAPPED: &str = "gridcraft.cell_tapped";
+
+pub(crate) fn add_keyboard_zone(ctx: &egui::Context, rect: egui::Rect) {
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<egui::Rect>>(egui::Id::new(KEYBOARD_ZONES)).push(rect));
 }
 
 #[allow(clippy::disallowed_methods)] // the clock is read only off wasm
