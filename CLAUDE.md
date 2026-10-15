@@ -7,6 +7,8 @@ Standards and learnings shared across the crafting apps live in `../../craftrule
 ## This fork (experintellia/gridcraft)
 This checkout is the fork `experintellia/gridcraft`, not upstream `storytold/gridcraft`. Its default branch is `webxdc` (GridCraft as a webxdc app with shared editing; `packaging/webxdc/package.sh`). **Open pull requests (against `webxdc`) and issues on the fork. Never open, comment on or push to anything in `storytold/gridcraft`.** Upstream issue numbers elsewhere in these docs (`#175`) refer to `storytold/gridcraft`.
 
+**Never request push or write access to a repository the user doesn't own or isn't a member of** (`storytold/*` included: the sibling craft apps, `craftrules`). Reading public repositories (clone, fetch, release pages and downloads) needs no extra access, so ask for nothing more; if a task seems to need more, stop and tell the user.
+
 ## Start every session here
 1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md` and the relevant `plan/architecture.md` section. Behaviour reference: `plan/excel/*.md` (`observed-ui.md` holds measured observations of the running app).
 2. Follow the autonomous operation protocol (`plan/execution-plan.md` §7). Don't stop to ask unless §7 lists the decision as the user's.
