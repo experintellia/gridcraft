@@ -159,7 +159,8 @@ fn keyboard_on_tap(ctx: egui::Context) {
 
 /// iOS pans the page to keep a natively focused text input above the keyboard, and doesn't always pan back once the
 /// keyboard hides: the canvas stays pushed up with the page background below it. The page itself never scrolls, so
-/// any pan left once no text input has focus is undone.
+/// any pan left once no text input has focus is undone (not on `focusout`: eframe's own iOS fix blurs and refocuses
+/// the input on every tap while editing).
 fn unpan_after_keyboard() {
     let Some(window) = web_sys::window() else { return };
     let unpan = Closure::<dyn FnMut()>::new(|| {
@@ -175,9 +176,6 @@ fn unpan_after_keyboard() {
     if let Some(vv) = window.visual_viewport() {
         let _ = vv.add_event_listener_with_callback("resize", f);
         let _ = vv.add_event_listener_with_callback("scroll", f);
-    }
-    if let Some(document) = window.document() {
-        let _ = document.add_event_listener_with_callback("focusout", f);
     }
     // Listening for the page's lifetime.
     unpan.forget();

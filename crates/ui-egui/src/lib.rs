@@ -1160,6 +1160,10 @@ impl SheetApp {
         ctx.data_mut(|d| {
             d.remove::<Vec<egui::Rect>>(egui::Id::new(KEYBOARD_ZONES));
             d.remove::<egui::Rect>(egui::Id::new(CELL_ZONE));
+            // A tap reported while editing (eframe focusing its input itself) must not edit again afterwards.
+            if self.editor.is_some() {
+                d.remove::<bool>(egui::Id::new(CELL_TAPPED));
+            }
         });
         self.poll_printing(&ctx);
         if !self.fonts_ready || self.fonts_rebind {
@@ -1357,11 +1361,16 @@ pub fn tap_cell_zone(ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
-/// Publishes the active cell's keyboard zone; true when its text input was tapped since the last frame.
-pub(crate) fn cell_keyboard_zone(ctx: &egui::Context, rect: egui::Rect) -> bool {
-    add_keyboard_zone(ctx, rect);
+/// Publishes the active cell's keyboard zone (none while the cell doesn't show or keeps its tap); true when its text
+/// input was tapped since the last frame.
+pub(crate) fn cell_keyboard_zone(ctx: &egui::Context, rect: Option<egui::Rect>) -> bool {
+    if let Some(rect) = rect {
+        add_keyboard_zone(ctx, rect);
+    }
     ctx.data_mut(|d| {
-        d.insert_temp(egui::Id::new(CELL_ZONE), rect);
+        if let Some(rect) = rect {
+            d.insert_temp(egui::Id::new(CELL_ZONE), rect);
+        }
         d.remove_temp::<bool>(egui::Id::new(CELL_TAPPED)).is_some()
     })
 }

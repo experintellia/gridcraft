@@ -97,6 +97,7 @@ fn a_mouse_click_on_the_active_cell_does_not_edit_even_after_a_touch() {
     tap(&mut h, p, false);
     h.step();
     assert!(h.state().editor.is_none());
+    assert!(!ime(&h), "no on-screen keyboard (or desktop IME) without editing");
 }
 
 #[test]
@@ -112,4 +113,39 @@ fn a_tap_on_the_text_input_over_the_active_cell_edits_it() {
     h.step();
     assert!(ime(&h));
     assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_none(), "while editing the input shrinks back to the text cursor");
+}
+
+#[test]
+fn no_text_input_over_an_active_cell_scrolled_out_of_view() {
+    let mut h = harness();
+    let grid = h.state().grid.rect.unwrap();
+    h.input_mut().events.extend([
+        Event::PointerMoved(grid.center()),
+        Event::MouseWheel { unit: egui::MouseWheelUnit::Point, phase: TouchPhase::Move, delta: vec2(0.0, -3000.0), modifiers: Modifiers::NONE },
+    ]);
+    h.run_steps(4);
+    assert!(h.state().view().scroll.y > 200.0, "the grid scrolled past C3");
+    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_none(), "C3 is out of view: a tap there must not edit it");
+}
+
+#[test]
+fn checkbox_cells_keep_their_tap() {
+    let mut h = harness();
+    h.state_mut().session.execute("insert.checkbox", json!({"range": "C3"})).unwrap();
+    h.run_steps(2);
+    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_none());
+}
+
+#[test]
+fn a_tap_reported_while_editing_does_not_edit_again_afterwards() {
+    let mut h = harness();
+    gridcraft_ui_egui::tap_cell_zone(&h.ctx);
+    h.step();
+    assert!(h.state().editor.is_some());
+    // eframe focusing its input itself while the edit runs.
+    gridcraft_ui_egui::tap_cell_zone(&h.ctx);
+    h.step();
+    h.state_mut().cancel_edit();
+    h.run_steps(2);
+    assert!(h.state().editor.is_none());
 }

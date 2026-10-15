@@ -2625,10 +2625,21 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
             Some(m) => geo.range_rect(sh, m),
             None => geo.cell_rect(sh, active),
         };
-        let zone = geo.mirror_rect(rect.intersect(geo.cells));
+        // Only where the cell shows: its own pane (not under frozen rows or columns, nor scrolled out of view),
+        // with no menu or popup over it, and clear of its edges (the fill handle, the move border). Checkboxes and
+        // links keep their tap.
+        let visible = geo
+            .range_panes(RangeRef::cell(active))
+            .into_iter()
+            .map(|pane| rect.intersect(pane).shrink(6.0))
+            .filter(|r| r.is_positive())
+            .max_by(|a, b| a.area().total_cmp(&b.area()))
+            .map(|r| geo.mirror_rect(r));
+        let covered = |z: Rect| egui::Popup::is_any_open(ctx) || !ctx.layer_id_at(z.center()).is_some_and(|l| l.order == egui::Order::Background);
+        let zone = visible.filter(|z| !covered(*z) && !is_checkbox(sh, app) && !sh.hyperlinks.contains_key(&active));
         if crate::cell_keyboard_zone(ctx, zone) {
             app.begin_edit(None, false);
-            crate::keep_keyboard(ctx, zone);
+            crate::keep_keyboard(ctx, zone.unwrap_or_else(|| geo.mirror_rect(rect)));
             return;
         }
     }
