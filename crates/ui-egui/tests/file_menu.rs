@@ -242,9 +242,11 @@ fn a_single_document_host_offers_no_other_workbooks() {
     h.get_by_label("File").click();
     h.run_steps(3);
     assert_eq!(page(&h), Some("info"));
-    for label in ["New", "Open", "Close", "Blank workbook"] {
+    // Nor Save (no file of its own: Save As hands a copy to the chat) or Print (no print dialog).
+    for label in ["New", "Open", "Close", "Blank workbook", "Save", "Print"] {
         assert!(h.query_by_label(label).is_none(), "{label} is hidden");
     }
+    assert!(h.query_by_label("Save As").is_some());
     // Replace with File warns before anything happens.
     click(&mut h, "Replace with File…");
     assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("replaceWorkbook"));

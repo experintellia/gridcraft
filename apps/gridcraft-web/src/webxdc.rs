@@ -4,9 +4,10 @@
 //! where the messenger has one, so collaborators online at the same time see them at once.
 //! Opening a file replaces the shared workbook (after a warning, once there is one); its name,
 //! or one given on File › Info (`file.rename`), titles the workbook for everyone and names the
-//! instance in the chat (`sendUpdate`'s `document`). Save and Export hand the file to the chat. The app is that one workbook: no New, Open, samples or window
-//! commands ([`Services::single_document`]). Until someone starts it, a start screen offers a
-//! blank workbook or a file.
+//! instance in the chat (`sendUpdate`'s `document`). Save As and Export hand the file to the chat;
+//! there's no Print (the messenger's sandbox has no print dialog). The app is that one workbook:
+//! no New, Open, Save, samples or window commands ([`Services::single_document`]). Until someone
+//! starts it, a start screen offers a blank workbook or a file.
 //!
 //! The realtime channel also carries each member's sheet and selection (presence), drawn on the
 //! others' grids; it isn't stored, so it needs a messenger with realtime channels.
@@ -98,6 +99,8 @@ impl Webxdc {
             }
         }));
         services.open_url = None;
+        // The messenger's sandbox has no print dialog.
+        services.print = None;
         services.single_document = true;
         let me = Reflect::get(&api, &"selfAddr".into()).ok().and_then(|a| a.as_string()).unwrap_or_default();
         let named = collab.title(session);

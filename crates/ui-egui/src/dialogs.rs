@@ -1037,6 +1037,8 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         "solver" => 460.0,
         _ => 380.0,
     };
+    // A phone is narrower than most dialogs.
+    let width = f32::min(width, ctx.content_rect().width() - 16.0).max(160.0);
     let window = egui::Window::new(app.ui.language.tr(&d.title))
         .id(egui::Id::new("dialog").with(&d.name))
         .collapsible(false)
@@ -1794,7 +1796,7 @@ fn insert_function(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confir
             let name = locale.function_name(f["name"].as_str().unwrap_or(""));
             let r = ui.add(
                 egui::Button::selectable(i == d.list_index, format!("{name:<18} {}", f["category"].as_str().unwrap_or("")))
-                    .min_size(vec2(480.0, 20.0)),
+                    .min_size(vec2(ui.available_width().min(480.0), 20.0)),
             );
             if r.clicked() {
                 d.list_index = i;
@@ -2265,7 +2267,8 @@ fn manage_rules(app: &mut SheetApp, ui: &mut egui::Ui) {
 }
 
 fn command_search(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool) {
-    let r = ui.add(egui::TextEdit::singleline(&mut d.search).desired_width(480.0).hint_text("Type a command, e.g. freeze, chart, bold…"));
+    let w = ui.available_width().min(480.0);
+    let r = ui.add(egui::TextEdit::singleline(&mut d.search).desired_width(w).hint_text("Type a command, e.g. freeze, chart, bold…"));
     r.request_focus();
     let q = d.search.to_ascii_lowercase();
     let cmds: Vec<(String, String, String)> = app
@@ -2285,7 +2288,7 @@ fn command_search(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm
     }
     egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
         for (i, (id, label, menu)) in cmds.iter().enumerate() {
-            let r = ui.add(egui::Button::selectable(i == d.list_index, format!("{label}    {menu}")).min_size(vec2(480.0, 20.0)));
+            let r = ui.add(egui::Button::selectable(i == d.list_index, format!("{label}    {menu}")).min_size(vec2(w, 20.0)));
             if r.clicked() {
                 d.list_index = i;
                 *confirm = true;
