@@ -1038,7 +1038,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         _ => 380.0,
     };
     // A phone is narrower than most dialogs.
-    let width = f32::min(width, ctx.content_rect().width() - 16.0);
+    let width = f32::min(width, ctx.content_rect().width() - 16.0).max(160.0);
     let window = egui::Window::new(app.ui.language.tr(&d.title))
         .id(egui::Id::new("dialog").with(&d.name))
         .collapsible(false)

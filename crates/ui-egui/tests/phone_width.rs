@@ -62,6 +62,13 @@ fn the_ribbon_tabs_swipe_sideways() {
 #[test]
 fn the_command_palette_fits() {
     let mut h = phone();
+    // Opened once on a wider screen first: it shrinks again on the narrower one.
+    h.set_size(egui::vec2(900.0, 844.0));
+    h.state_mut().open_dialog("commandSearch", serde_json::json!({}));
+    h.run_steps(4);
+    h.state_mut().dialog = None;
+    h.set_size(egui::vec2(390.0, 844.0));
+    h.run_steps(2);
     h.state_mut().open_dialog("commandSearch", serde_json::json!({}));
     h.run_steps(4);
     let r = h.ctx.memory(|m| m.area_rect(egui::Id::new("dialog").with("commandSearch"))).expect("palette");

@@ -811,8 +811,10 @@ impl SheetApp {
         if !self.commit_edit(0, 0, false, false) {
             return;
         }
-        // Home, New and Open are about other workbooks.
-        let page = if self.services.single_document && matches!(page, backstage::Page::Home | backstage::Page::New | backstage::Page::Open) {
+        // Home, New and Open are about other workbooks; Print is left out too (see `backstage::show`).
+        let page = if self.services.single_document
+            && matches!(page, backstage::Page::Home | backstage::Page::New | backstage::Page::Open | backstage::Page::Print)
+        {
             backstage::Page::Info
         } else {
             page
