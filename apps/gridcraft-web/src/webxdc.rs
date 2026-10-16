@@ -10,6 +10,11 @@
 //! no New, Open, Save, samples or window commands ([`Services::single_document`]). Until someone
 //! starts it, a start screen offers a blank workbook or a file.
 //!
+//! Every `SHARE_EVERY` ops (see [`crate::collab`]) the member who crossed the line also sends a
+//! full copy of the workbook, `{snap: <base64 JSON>}`, when it fits in the messenger's
+//! `sendUpdateMaxSize`; on start, the app waits for all stored updates and replays only the ops
+//! after the latest copy that matches them. Older builds ignore payloads without `y`.
+//!
 //! The realtime channel also carries each member's sheet and selection (presence), drawn on the
 //! others' grids; it isn't stored, so it needs a messenger with realtime channels.
 
@@ -29,6 +34,8 @@ use crate::collab::Collab;
 
 /// The realtime channel's limit per message; larger updates go by `sendUpdate` alone.
 const REALTIME_MAX: usize = 128_000;
+/// The webxdc spec's `sendUpdateMaxSize` for messengers that don't give one.
+const UPDATE_MAX: usize = 128_000;
 /// Realtime messages start with one of these.
 const TAG_UPDATE: u8 = 0;
 const TAG_PRESENCE: u8 = 1;
@@ -58,8 +65,12 @@ pub struct Webxdc {
     collab: Collab,
     ctx: Option<egui::Context>,
     me: String,
-    /// Received since the last frame.
+    /// Received since the last frame (held until the stored ones are all in).
     received: Rc<RefCell<Vec<Vec<u8>>>>,
+    /// Copies of the workbook received, likewise.
+    copies: Rc<RefCell<Vec<Vec<u8>>>>,
+    /// `sendUpdateMaxSize`: the most a whole `sendUpdate` object may take, serialized.
+    update_max: usize,
     /// The messenger has handed over the updates it stored: an empty log now means nobody has
     /// started the workbook.
     replayed: Rc<Cell<bool>>,
@@ -105,8 +116,11 @@ impl Webxdc {
         services.single_document = true;
         let me = Reflect::get(&api, &"selfAddr".into()).ok().and_then(|a| a.as_string()).unwrap_or_default();
         let named = collab.title(session);
+        let update_max = Reflect::get(&api, &"sendUpdateMaxSize".into()).ok().and_then(|m| m.as_f64()).map_or(UPDATE_MAX, |m| m as usize);
         Some(Webxdc {
             named,
+            copies: Rc::default(),
+            update_max,
             api,
             channel: None,
             collab,
@@ -125,19 +139,23 @@ impl Webxdc {
     /// Starts hearing updates: the stored ones first, then live ones.
     pub fn listen(&mut self, ctx: egui::Context) {
         self.ctx = Some(ctx.clone());
-        let received = self.received.clone();
+        let (received, copies) = (self.received.clone(), self.copies.clone());
         let repaint = ctx.clone();
         // Stored updates handed over, and their bytes, for the startup report.
         let stored = Rc::new(Cell::new((0usize, 0usize)));
         let count = stored.clone();
         let on_update = Closure::<dyn FnMut(JsValue)>::new(move |update: JsValue| {
-            let y = Reflect::get(&update, &"payload".into()).and_then(|p| Reflect::get(&p, &"y".into())).ok().and_then(|y| y.as_string());
-            if let Some(bytes) = y.as_deref().and_then(base64_decode) {
-                let (n, size) = count.get();
-                count.set((n + 1, size + bytes.len()));
-                received.borrow_mut().push(bytes);
-                repaint.request_repaint();
-            }
+            let payload = Reflect::get(&update, &"payload".into()).unwrap_or_default();
+            let field = |key: &str| Reflect::get(&payload, &key.into()).ok().and_then(|v| v.as_string()).as_deref().and_then(base64_decode);
+            let (bytes, to) = match (field("y"), field("snap")) {
+                (Some(y), _) => (y, &received),
+                (None, Some(copy)) => (copy, &copies),
+                (None, None) => return,
+            };
+            let (n, size) = count.get();
+            count.set((n + 1, size + bytes.len()));
+            to.borrow_mut().push(bytes);
+            repaint.request_repaint();
         });
         match call(&self.api, "setUpdateListener", &[on_update.as_ref().clone(), 0.into()]) {
             Ok(done) => {
@@ -188,11 +206,18 @@ impl Webxdc {
     /// ones, once confirmed) for everyone.
     pub fn before(&mut self, app: &mut SheetApp, inbox: &Inbox) {
         self.hear(app);
-        let received = std::mem::take(&mut *self.received.borrow_mut());
-        if !received.is_empty() {
-            let (n, size, t) = (received.len(), received.iter().map(Vec::len).sum::<usize>(), crate::perf::now());
-            self.collab.remote(&mut app.session, received);
-            crate::perf::mark(format!("applied {n} updates ({} KB) in {:.0} ms", size / 1000, crate::perf::now() - t));
+        // The stored updates all at once, copies first: only the ops after the latest matching
+        // copy replay, once.
+        if self.replayed.get() {
+            for copy in std::mem::take(&mut *self.copies.borrow_mut()) {
+                self.collab.offer(copy);
+            }
+            let received = std::mem::take(&mut *self.received.borrow_mut());
+            if !received.is_empty() {
+                let (n, size, t) = (received.len(), received.iter().map(Vec::len).sum::<usize>(), crate::perf::now());
+                self.collab.remote(&mut app.session, received);
+                crate::perf::mark(format!("applied {n} updates ({} KB) in {:.0} ms", size / 1000, crate::perf::now() - t));
+            }
         }
         let dropped = std::mem::take(&mut *self.dropped.lock().unwrap_or_else(|e| e.into_inner()));
         let mut files = std::mem::take(&mut *inbox.lock().unwrap_or_else(|e| e.into_inner()));
@@ -230,6 +255,13 @@ impl Webxdc {
     pub fn after(&mut self, app: &mut SheetApp) {
         if let Some(update) = self.collab.local(&mut app.session) {
             self.send(&app.session, &update);
+        }
+        // `{"payload":{"snap":"<base64>"}}`: base64 takes 4 bytes for every 3.
+        if let Some(copy) = self.collab.share(&app.session, self.update_max.saturating_sub(64) / 4 * 3) {
+            let payload = object(&[("snap", base64_encode(&copy).into())]);
+            if let Err(e) = call(&self.api, "sendUpdate", &[object(&[("payload", payload)]), "".into()]) {
+                log::warn!("couldn't share a copy of the workbook: {e:?}");
+            }
         }
         self.start(app);
         self.tell(&app.session);
