@@ -14,7 +14,8 @@ fn harness(input: &str) -> Harness {
     session.new_workbook();
     session.execute("home.mergeCells", json!({"range": "A1:B2"})).unwrap();
     session.execute("cell.set", json!({"cell": "A1", "input": input})).unwrap();
-    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+    // Frames 1/60 s apart, so two clicks a couple of frames apart are a double-click.
+    let mut h = egui_kittest::Harness::builder().with_step_dt(1.0 / 60.0).with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
         |ui, app: &mut SheetApp| {
             app.logic(ui.ctx());
             app.ui(ui);

@@ -2,6 +2,8 @@
 
 use gridcraft_engine::Session;
 use gridcraft_ui_egui::{Inbox, Services, SheetApp};
+use std::cell::Cell;
+use std::rc::Rc;
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::JsValue;
 use wasm_bindgen::closure::Closure;
@@ -33,6 +35,7 @@ pub fn start() {
                 Box::new(move |cc| {
                     crate::perf::mark("WebGL2 context ready");
                     keyboard_on_tap(cc.egui_ctx.clone());
+                    let gestures = forward_cell_gestures(cc.egui_ctx.clone());
                     let inbox: Inbox = Inbox::default();
                     let mut session = Session::new();
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone());
@@ -73,7 +76,7 @@ pub fn start() {
                         webxdc.listen(cc.egui_ctx.clone());
                         crate::perf::mark("listening for shared edits");
                     }
-                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, webxdc, frames: 0, shown: None }))
+                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, webxdc, gestures, frames: 0, shown: None }))
                 }),
             )
             .await;
@@ -157,6 +160,146 @@ fn keyboard_on_tap(ctx: egui::Context) {
     on_focus.forget();
 }
 
+/// What a one-finger touch that began on the text input over the active cell has turned into so far.
+#[derive(Clone, Copy, PartialEq)]
+enum Gesture {
+    /// Maybe a tap, which stays the input's own: focusing it natively is what opens the iOS keyboard.
+    Tap,
+    Drag,
+    LongPress,
+}
+
+#[derive(Clone, Copy)]
+struct CellTouch {
+    id: i32,
+    /// Where it began, in CSS pixels.
+    x: i32,
+    y: i32,
+    gesture: Gesture,
+    /// The timeout that makes it a long press.
+    timer: i32,
+}
+
+/// How far (CSS pixels) a tap may move: farther, it's a drag.
+const TAP_SLOP: i32 = 10;
+
+/// Touches that begin on the text input over the active cell go to the input, not to eframe's canvas listeners. Once
+/// one turns into a drag or a long press it belongs to the grid: its events go to egui (as eframe sends a finger on
+/// the canvas, and a long press as the secondary click that opens the context menu) and the browser's own handling
+/// (text selection, the text menu) is prevented. Returns the events for [`WebShell`] to hand egui.
+fn forward_cell_gestures(ctx: egui::Context) -> Rc<Cell<Vec<egui::Event>>> {
+    let events: Rc<Cell<Vec<egui::Event>>> = Rc::default();
+    let Some(window) = web_sys::window() else { return events };
+    let Some(document) = window.document() else { return events };
+    let touch: Rc<Cell<Option<CellTouch>>> = Rc::default();
+    let send = {
+        let (events, ctx) = (events.clone(), ctx.clone());
+        Rc::new(move |more: Vec<egui::Event>| {
+            let mut all = events.take();
+            all.extend(more);
+            events.set(all);
+            ctx.request_repaint();
+        })
+    };
+    // Points, from CSS pixels.
+    let at = {
+        let ctx = ctx.clone();
+        Rc::new(move |x: i32, y: i32| {
+            let r = canvas_and_input().map(|(canvas, _)| canvas.get_bounding_client_rect());
+            let (left, top) = r.map_or((0.0, 0.0), |r| (r.left(), r.top()));
+            let zoom = ctx.zoom_factor();
+            egui::pos2((f64::from(x) - left) as f32 / zoom, (f64::from(y) - top) as f32 / zoom)
+        })
+    };
+    // This touch, among the event's changed ones.
+    let find = |e: &web_sys::TouchEvent, id: i32| {
+        (0..e.changed_touches().length()).filter_map(|i| e.changed_touches().get(i)).find(|t| t.identifier() == id)
+    };
+
+    // Held still as long as egui waits for a long press elsewhere on the grid.
+    let on_hold = Closure::<dyn FnMut()>::new({
+        let (touch, send, at) = (touch.clone(), send.clone(), at.clone());
+        move || {
+            let Some(t) = touch.get().filter(|t| t.gesture == Gesture::Tap) else { return };
+            touch.set(Some(CellTouch { gesture: Gesture::LongPress, ..t }));
+            send(gridcraft_ui_egui::long_press_events(at(t.x, t.y)));
+        }
+    });
+    let hold_ms = ctx.options(|o| o.input_options.max_click_duration * 1000.0).clamp(0.0, 10_000.0) as i32;
+    let on_start = Closure::<dyn FnMut(web_sys::TouchEvent)>::new({
+        let (touch, window) = (touch.clone(), window.clone());
+        let hold: js_sys::Function = on_hold.as_ref().unchecked_ref::<js_sys::Function>().clone();
+        move |e: web_sys::TouchEvent| {
+            // Another finger makes a waiting tap a pinch.
+            if let Some(t) = touch.get().filter(|t| t.gesture == Gesture::Tap) {
+                window.clear_timeout_with_handle(t.timer);
+                touch.set(None);
+            }
+            let on_input = canvas_and_input().is_some_and(|(_, input)| e.target().as_ref() == Some(input.as_ref()));
+            if let Some(t) = e.changed_touches().get(0).filter(|_| on_input && e.touches().length() == 1) {
+                let timer = window.set_timeout_with_callback_and_timeout_and_arguments_0(&hold, hold_ms).unwrap_or(0);
+                touch.set(Some(CellTouch { id: t.identifier(), x: t.client_x(), y: t.client_y(), gesture: Gesture::Tap, timer }));
+            }
+        }
+    });
+    let on_move = Closure::<dyn FnMut(web_sys::TouchEvent)>::new({
+        let (touch, window, send, at) = (touch.clone(), window.clone(), send.clone(), at.clone());
+        move |e: web_sys::TouchEvent| {
+            let Some(mut t) = touch.get() else { return };
+            let Some(now) = find(&e, t.id) else { return };
+            if t.gesture == Gesture::Tap {
+                if (now.client_x() - t.x).abs() <= TAP_SLOP && (now.client_y() - t.y).abs() <= TAP_SLOP {
+                    return;
+                }
+                window.clear_timeout_with_handle(t.timer);
+                t.gesture = Gesture::Drag;
+                touch.set(Some(t));
+                send(gridcraft_ui_egui::finger_events(egui::TouchPhase::Start, t.id.into(), at(t.x, t.y)));
+            }
+            if t.gesture == Gesture::Drag {
+                send(gridcraft_ui_egui::finger_events(egui::TouchPhase::Move, t.id.into(), at(now.client_x(), now.client_y())));
+            }
+            e.prevent_default();
+            e.stop_propagation();
+        }
+    });
+    let on_end = Closure::<dyn FnMut(web_sys::TouchEvent)>::new({
+        let (touch, window) = (touch.clone(), window.clone());
+        move |e: web_sys::TouchEvent| {
+            let Some(t) = touch.get() else { return };
+            let Some(now) = find(&e, t.id) else { return };
+            touch.set(None);
+            match t.gesture {
+                Gesture::Tap => {
+                    window.clear_timeout_with_handle(t.timer);
+                    return;
+                }
+                Gesture::Drag => {
+                    let phase = if e.type_() == "touchcancel" { egui::TouchPhase::Cancel } else { egui::TouchPhase::End };
+                    send(gridcraft_ui_egui::finger_events(phase, t.id.into(), at(now.client_x(), now.client_y())));
+                }
+                Gesture::LongPress => send(vec![egui::Event::PointerGone]),
+            }
+            // No focus (and keyboard) or text menu after it, and eframe's own listeners on the document skip it.
+            e.prevent_default();
+            e.stop_propagation();
+        }
+    });
+    // Capturing, ahead of eframe's listeners on the document, and not passive, so the browser's handling can be prevented.
+    let options = web_sys::AddEventListenerOptions::new();
+    options.set_capture(true);
+    options.set_passive(false);
+    for (name, f) in [("touchstart", &on_start), ("touchmove", &on_move), ("touchend", &on_end), ("touchcancel", &on_end)] {
+        let _ = document.add_event_listener_with_callback_and_add_event_listener_options(name, f.as_ref().unchecked_ref(), &options);
+    }
+    // Listening for the page's lifetime.
+    on_hold.forget();
+    on_start.forget();
+    on_move.forget();
+    on_end.forget();
+    events
+}
+
 /// iOS pans the page to keep a natively focused text input above the keyboard, and doesn't always pan back once the
 /// keyboard hides: the canvas stays pushed up with the page background below it. The page itself never scrolls, so
 /// any pan left once no text input has focus is undone (not on `focusout`: eframe's own iOS fix blurs and refocuses
@@ -219,6 +362,8 @@ struct WebShell {
     inbox: Inbox,
     bridge: Option<crate::host::Bridge>,
     webxdc: Option<crate::webxdc::Webxdc>,
+    /// Touch events for egui that eframe didn't see ([`forward_cell_gestures`]).
+    gestures: Rc<Cell<Vec<egui::Event>>>,
     /// Frames run, and the one that first showed the workbook or the start screen, for the
     /// startup report ([`crate::perf`]).
     frames: u64,
@@ -258,6 +403,7 @@ impl eframe::App for WebShell {
     }
 
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        raw.events.extend(self.gestures.take());
         self.app.raw_input_hook(raw);
     }
 

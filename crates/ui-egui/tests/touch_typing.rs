@@ -149,3 +149,35 @@ fn a_tap_reported_while_editing_does_not_edit_again_afterwards() {
     h.run_steps(2);
     assert!(h.state().editor.is_none());
 }
+
+#[test]
+fn a_drag_from_the_text_input_over_the_active_cell_selects() {
+    let mut h = harness();
+    let (d5, f7) = (center(&h, CellRef::new(4, 3)), center(&h, CellRef::new(6, 5)));
+    tap(&mut h, d5, true);
+    // A second later (no double-click), the text input lies over D5.
+    h.run_steps(60);
+    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_some_and(|z| z.contains(d5)));
+    // What the web shell sends for a drag that began on its text input.
+    for (phase, pos) in [(TouchPhase::Start, d5), (TouchPhase::Move, d5 + vec2(12.0, 12.0)), (TouchPhase::Move, f7), (TouchPhase::End, f7)] {
+        h.input_mut().events.extend(gridcraft_ui_egui::finger_events(phase, TouchId(2), pos));
+        h.step();
+    }
+    h.step();
+    assert!(h.state().editor.is_none(), "a drag doesn't edit");
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "D5:F7");
+}
+
+#[test]
+fn a_long_press_on_the_text_input_over_the_active_cell_opens_the_context_menu() {
+    let mut h = harness();
+    let c3 = center(&h, CellRef::new(2, 2));
+    h.input_mut().events.extend(gridcraft_ui_egui::long_press_events(c3));
+    h.step();
+    // The finger lifts.
+    h.input_mut().events.push(Event::PointerGone);
+    h.step();
+    assert!(h.state().grid.context_menu.is_some());
+    assert!(h.state().editor.is_none());
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "C3");
+}
