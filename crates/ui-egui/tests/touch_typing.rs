@@ -149,3 +149,16 @@ fn a_tap_reported_while_editing_does_not_edit_again_afterwards() {
     h.run_steps(2);
     assert!(h.state().editor.is_none());
 }
+
+#[test]
+fn the_text_input_covers_most_of_the_active_cell() {
+    let h = harness();
+    let app = h.state();
+    let sheet = app.session.active().unwrap().wb.active().unwrap();
+    let cell = Geo::new(sheet, app.grid.rect.unwrap(), app.view().scroll).screen_cell_rect(sheet, CellRef::new(2, 2));
+    let zone = gridcraft_ui_egui::cell_zone(&h.ctx).expect("a zone over C3");
+    // A tap near the top or bottom of the cell must still land on the input, or iOS keeps the keyboard down.
+    assert!(zone.height() >= cell.height() - 4.0, "{zone:?} in {cell:?}");
+    // The fill handle at the bottom-right corner stays on the grid.
+    assert!(!zone.contains(cell.right_bottom() - egui::vec2(2.0, 2.0)));
+}
