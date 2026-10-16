@@ -2121,8 +2121,9 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             app.grid.drag = Drag::Move { grab: c, to: None };
             return;
         }
-        // Double-click edits.
-        let now = crate::now_ms();
+        // Double-click edits. (egui's clock: `now_ms` reads none on the web, where every press on the last clicked
+        // cell would count, such as a drag from a cell a tap selected.)
+        let now = ctx.input(|i| i.time) * 1000.0;
         if let Some((last, at)) = app.grid.last_click
             && last == c
             && now - at < 450.0
