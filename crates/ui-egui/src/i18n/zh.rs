@@ -343,6 +343,21 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Close" => "关闭",
         "Options" => "选项",
         "Blank workbook" => "空白工作簿",
+        // webxdc: the start screen and Replace with File.
+        "Start a workbook" => "开始一个工作簿",
+        "Everyone in this chat works on the same workbook." => "此聊天中的所有人都在同一个工作簿中工作。",
+        "New blank workbook" => "新建空白工作簿",
+        "Start with empty sheets." => "从空白工作表开始。",
+        "Open a file" => "打开文件",
+        "Share a workbook from this device with the chat." => "将此设备上的工作簿共享到聊天中。",
+        "Replace with File…" => "用文件替换…",
+        "Replace Workbook" => "替换工作簿",
+        "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
+            "该文件将为聊天中的所有人替换此工作簿。撤消可恢复工作簿。"
+        }
+        "Replace" => "替换",
+        "Choose File…" => "选择文件…",
+        "Cancel" => "取消",
         "Recent" => "最近",
         "No recent workbooks yet." => "还没有最近使用的工作簿。",
         "More workbooks" => "更多工作簿",

@@ -345,6 +345,21 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Close" => "Закрыть",
         "Options" => "Параметры",
         "Blank workbook" => "Пустая книга",
+        // webxdc: the start screen and Replace with File.
+        "Start a workbook" => "Начать работу с книгой",
+        "Everyone in this chat works on the same workbook." => "Все участники этого чата работают с одной и той же книгой.",
+        "New blank workbook" => "Новая пустая книга",
+        "Start with empty sheets." => "Начать с пустых листов.",
+        "Open a file" => "Открыть файл",
+        "Share a workbook from this device with the chat." => "Поделиться в чате книгой с этого устройства.",
+        "Replace with File…" => "Заменить файлом…",
+        "Replace Workbook" => "Замена книги",
+        "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
+            "Файл заменит эту книгу для всех участников чата. Команда «Отменить» вернёт книгу."
+        }
+        "Replace" => "Заменить",
+        "Choose File…" => "Выбрать файл…",
+        "Cancel" => "Отмена",
         "Recent" => "Последние",
         "No recent workbooks yet." => "Недавних книг пока нет.",
         "More workbooks" => "Другие книги",
