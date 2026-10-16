@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-14 · **Change:** minor (web: typing on phones and tablets) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-16 · **Change:** minor (web: one tap types in the name box and dialog fields on phones) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -160,9 +160,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   already strong. **Estimate:** 30–50 h; model choice needs the owner.
 
 ### 23. Mobile (platform)
-- No iOS, iPadOS or Android layout. The web build can type on phones: tapping the active cell or the formula bar
-  edits with the on-screen keyboard. On a phone-width screen the formula bar's text field is squeezed out (only
-  the name box and ×/✓ show). **Estimate:** 30–60 h.
+- No iOS, iPadOS or Android layout. The web build can type on phones: tapping the active cell, the formula bar,
+  the name box or a dialog's text field edits with the on-screen keyboard. On a phone-width screen the formula
+  bar's text field is squeezed out (only the name box and ×/✓ show). **Estimate:** 30–60 h.
 
 ### 24. Fonts and look (U)
 - Font weights beyond regular/bold (#168), system font list (#4), Calibri metrics (#29), macOS
@@ -172,6 +172,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-16 | minor | §23: one tap on the name box or a dialog's text field opens the keyboard on phones |
 | 2026-10-14 | minor | §23: web build types on phones (tap the active cell or the formula bar) |
 | 2026-10-13 | minor | webxdc build: shared workbook editing in a chat (#16 co-authoring, partly) |
 | 2026-10-12 | minor | rows auto-fit oversized fonts on open and whole-row/column formatting (#833) |

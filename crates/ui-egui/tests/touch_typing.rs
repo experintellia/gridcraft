@@ -1,5 +1,6 @@
 //! A finger tap on the active cell (or the formula bar) edits it, and the frames around it keep the platform text
-//! input (the on-screen keyboard) up: both are keyboard zones, and editing asks for IME from its first frame.
+//! input (the on-screen keyboard) up: both are keyboard zones, and editing asks for IME from its first frame. A tap on
+//! the web shell's text input over a text field (the name box, a dialog's) focuses that field.
 
 use egui::{Event, Modifiers, PointerButton, Pos2, TouchDeviceId, TouchId, TouchPhase, vec2};
 use gridcraft_engine::Session;
@@ -8,10 +9,14 @@ use gridcraft_ui_egui::{SheetApp, grid::Geo};
 use serde_json::json;
 
 fn harness() -> egui_kittest::Harness<'static, SheetApp> {
+    harness_of_size(vec2(1200.0, 800.0))
+}
+
+fn harness_of_size(size: egui::Vec2) -> egui_kittest::Harness<'static, SheetApp> {
     let mut session = Session::new();
     session.new_workbook();
     session.execute("selection.set", json!({"cell": "C3"})).unwrap();
-    let mut h = egui_kittest::Harness::builder().with_step_dt(1.0 / 60.0).with_size(vec2(1200.0, 800.0)).build_ui_state(
+    let mut h = egui_kittest::Harness::builder().with_step_dt(1.0 / 60.0).with_size(size).build_ui_state(
         |ui, app: &mut SheetApp| {
             app.logic(ui.ctx());
             app.ui(ui);
@@ -45,6 +50,24 @@ fn tap(h: &mut egui_kittest::Harness<'_, SheetApp>, pos: Pos2, touch: bool) {
 
 fn ime(h: &egui_kittest::Harness<'_, SheetApp>) -> bool {
     h.output().platform_output.ime.is_some()
+}
+
+fn focused(h: &egui_kittest::Harness<'_, SheetApp>) -> Option<egui::Id> {
+    h.ctx.memory(|m| m.focused())
+}
+
+/// The text zones as the web shell reads them, at the end of the pass (with the pass's IME output).
+fn text_zones(h: &mut egui_kittest::Harness<'_, SheetApp>) -> Vec<egui::Rect> {
+    let id = egui::Id::new("test.text_zones");
+    h.ctx.on_end_pass(
+        "test.text_zones",
+        std::sync::Arc::new(move |ui: &mut egui::Ui| {
+            let zones = gridcraft_ui_egui::text_zones(ui.ctx());
+            ui.ctx().data_mut(|d| d.insert_temp(id, zones));
+        }),
+    );
+    h.step();
+    h.ctx.data(|d| d.get_temp(id)).unwrap_or_default()
 }
 
 #[test]
@@ -148,4 +171,69 @@ fn a_tap_reported_while_editing_does_not_edit_again_afterwards() {
     h.state_mut().cancel_edit();
     h.run_steps(2);
     assert!(h.state().editor.is_none());
+}
+
+#[test]
+fn a_tap_on_the_text_input_over_the_name_box_focuses_it() {
+    let mut h = harness();
+    let grid_top = h.state().grid.rect.unwrap().top();
+    let zones = text_zones(&mut h);
+    let c3 = center(&h, CellRef::new(2, 2));
+    assert!(zones.iter().any(|z| z.contains(c3)), "the input lies over the active cell");
+    let name_box = zones.into_iter().find(|z| z.bottom() <= grid_top).expect("the input lies over the name box too");
+
+    assert!(gridcraft_ui_egui::tap_text_zone(&h.ctx, name_box.center()).is_some());
+    h.step();
+    assert_eq!(focused(&h), Some(egui::Id::new("gridcraft.name_box")));
+    assert!(h.state().editor.is_none(), "no cell edit");
+    assert!(ime(&h), "the keyboard stays up");
+    assert!(text_zones(&mut h).is_empty(), "while typing the input follows the text cursor");
+    h.input_mut().events.push(Event::Text("E9".into()));
+    h.step();
+    assert_eq!(h.state().name_box.as_deref(), Some("E9"), "typing replaces the reference");
+}
+
+#[test]
+fn a_tap_on_the_text_input_over_a_dialog_field_focuses_it() {
+    let mut h = harness();
+    h.state_mut().open_dialog("find", json!({"replace": true}));
+    h.run_steps(4);
+    let grid_top = h.state().grid.rect.unwrap().top();
+    let fields: Vec<_> = text_zones(&mut h).into_iter().filter(|z| z.top() > grid_top).collect();
+    assert_eq!(fields.len(), 2, "Find what and Replace with, and no active cell under the dialog");
+    // Between the fields the tap reaches the dialog.
+    assert!(gridcraft_ui_egui::tap_text_zone(&h.ctx, fields[0].center_bottom() + vec2(0.0, 2.0)).is_none());
+
+    let with = fields[1];
+    assert_eq!(gridcraft_ui_egui::tap_text_zone(&h.ctx, with.center()), Some(with));
+    h.step();
+    assert!(ime(&h), "the Replace with field takes typing");
+    let id = focused(&h).expect("a focused field");
+    h.input_mut().events.push(Event::Text("x".into()));
+    h.step();
+    assert_eq!(focused(&h), Some(id));
+    assert_eq!(h.state().dialog.as_ref().and_then(|d| d.values.get("with").cloned()), Some(json!("x")));
+}
+
+#[test]
+fn no_text_input_over_a_field_a_dialog_covers() {
+    // A phone: the dialog spans the width, over the name box.
+    let mut h = harness_of_size(vec2(390.0, 330.0));
+    let grid_top = h.state().grid.rect.unwrap().top();
+    assert!(text_zones(&mut h).iter().any(|z| z.bottom() <= grid_top), "the name box takes a tap");
+    h.state_mut().open_dialog("find", json!({"replace": true}));
+    h.run_steps(4);
+    let zones = text_zones(&mut h);
+    assert_eq!(zones.len(), 2, "only the dialog's fields: {zones:?}");
+    let dialog = h.ctx.memory(|m| m.area_rect(egui::Id::new("dialog").with("find"))).unwrap();
+    assert!(zones.iter().all(|z| dialog.contains_rect(*z)));
+}
+
+#[test]
+fn a_tap_on_the_text_input_over_the_active_cell_still_edits_it() {
+    let mut h = harness();
+    let c3 = center(&h, CellRef::new(2, 2));
+    assert!(gridcraft_ui_egui::tap_text_zone(&h.ctx, c3).is_some());
+    h.step();
+    assert_eq!(h.state().editor.as_ref().map(|e| e.cell), Some(CellRef::new(2, 2)));
 }
