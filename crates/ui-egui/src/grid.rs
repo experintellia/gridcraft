@@ -118,6 +118,9 @@ pub struct GridState {
     /// The selection outline on its way to a new selection.
     pub glide: crate::selection_glide::SelectionGlide,
     pub last_click: Option<(CellRef, f64)>,
+    /// Typing by touch: an edit started by a tap, or the on-screen keyboard kept up after one was committed with
+    /// Enter or Tab, so the next keystroke edits the next cell (see `keyboard`).
+    pub touch_typing: bool,
     pub hover_cell: Option<CellRef>,
     pub autosave: bool,
     pub last_autosave: f64,
@@ -2145,6 +2148,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             && !sh.hyperlinks.contains_key(&c)
         {
             app.begin_edit(None, false);
+            app.grid.touch_typing = true;
             return;
         }
         app.grid.last_click = Some((c, now));
@@ -2614,6 +2618,7 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
     }
     let other_focus = ctx.memory(|m| m.focused()).is_some_and(|f| f != resp.id && (editing || !stale.contains(&f)));
     if editing || app.dialog.is_some() || other_focus || app.message.is_some() {
+        app.grid.touch_typing &= editing;
         return;
     }
     if ctx.memory(|m| m.focused()).is_none() {
@@ -2639,8 +2644,17 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
         let zone = visible.filter(|z| !covered(*z) && !is_checkbox(sh, app) && !sh.hyperlinks.contains_key(&active));
         if crate::cell_keyboard_zone(ctx, zone) {
             app.begin_edit(None, false);
+            app.grid.touch_typing = true;
             crate::keep_keyboard(ctx, zone.unwrap_or_else(|| geo.mirror_rect(rect)));
             return;
+        }
+        // After Enter or Tab the keyboard stays up for the next cell (its input must stay focused for iOS to keep
+        // it), and typing edits that cell, until a tap or scroll gesture, or the cell is covered or out of view.
+        if app.grid.touch_typing {
+            match zone.filter(|_| ctx.input(|i| i.focused && !i.pointer.any_pressed())) {
+                Some(z) => crate::keep_keyboard(ctx, z),
+                None => app.grid.touch_typing = false,
+            }
         }
     }
     // The grid owns arrows, Tab and Escape (egui would otherwise move focus between widgets).

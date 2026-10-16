@@ -1003,6 +1003,8 @@ impl SheetApp {
                 if dr != 0 || dc != 0 {
                     self.move_after_enter(dr, dc);
                 }
+                // Typing by touch goes on in the next cell after Enter or Tab; any other commit ends it.
+                self.grid.touch_typing &= dr != 0 || dc != 0;
                 self.after_engine();
                 true
             }
@@ -1017,6 +1019,7 @@ impl SheetApp {
 
     pub fn cancel_edit(&mut self) {
         self.editor = None;
+        self.grid.touch_typing = false;
         self.session.mode = gridcraft_engine::Mode::Ready;
     }
 
