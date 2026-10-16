@@ -2,7 +2,8 @@
 //! workbook ([`crate::collab`]). Edits travel as `sendUpdate` payloads `{y: <base64 Yjs update>}`,
 //! which the messenger stores and replays on every start, and also over the realtime channel
 //! where the messenger has one, so collaborators online at the same time see them at once.
-//! Opening a file replaces the shared workbook (after a warning, once there is one); its name,
+//! Opening a file replaces the shared workbook (after a warning, once there is one; a
+//! password-protected one asks for its password, which never leaves the device); its name,
 //! or one given on File › Info (`file.rename`), titles the workbook for everyone and names the
 //! instance in the chat (`sendUpdate`'s `document`). Save As and Export hand the file to the chat;
 //! there's no Print (the messenger's sandbox has no print dialog). The app is that one workbook:
@@ -211,7 +212,12 @@ impl Webxdc {
                     }
                     app.backstage = None;
                 }
-                // ponytail: a password-protected file isn't asked for its password here.
+                // The Password dialog decrypts it and puts the plain file back in the inbox: the
+                // password stays on this device, only the workbook is shared.
+                Err(e) if e.to_string().contains(gridcraft_engine::io::PASSWORD_REQUIRED) => {
+                    app.backstage = None;
+                    app.open_dialog("openPassword", serde_json::json!({"name": name, "base64": base64_encode(&bytes)}));
+                }
                 Err(e) => app.message = Some(("GridCraft".into(), gridcraft_ui_egui::clean_error(&e.to_string()))),
             }
         }

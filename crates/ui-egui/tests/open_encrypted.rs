@@ -170,3 +170,37 @@ fn app_open_over_the_control_channel_never_opens_a_dialog() {
     assert_eq!(h.state().ui.recent.first(), Some(&p));
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+/// webxdc: the host opens files itself, so the dialog hands it the decrypted file, never the
+/// password.
+#[test]
+fn a_single_document_host_gets_the_decrypted_file_not_the_password() {
+    let inbox: Inbox = Default::default();
+    let mut h = harness(Services { single_document: true, inbox: Some(inbox.clone()), ..Default::default() });
+    let before = h.state().session.documents().len();
+    h.state_mut().open_dialog("openPassword", json!({"name": "Secret.xlsx", "base64": gridcraft_engine::io::base64_encode(&encrypted_bytes())}));
+    h.run_steps(3);
+    // A wrong password says so and keeps asking; nothing reaches the host.
+    h.state_mut().dialog.as_mut().unwrap().values.insert("password".into(), json!("wrong-guess"));
+    h.get_by_label("   OK   ").click();
+    h.run_steps(3);
+    let msg = h.state().message.as_ref().map(|(_, m)| m.clone()).unwrap_or_default();
+    assert!(msg.contains(gridcraft_engine::io::WRONG_PASSWORD) && !msg.contains("wrong-guess"), "{msg}");
+    assert_eq!(dialog(&h).as_deref(), Some("openPassword"));
+    assert_eq!(h.state().dialog.as_ref().and_then(|d| d.values.get("password")), Some(&json!("")));
+    assert!(inbox.lock().unwrap().is_empty());
+    h.state_mut().message = None;
+    // The right one: the plain file goes to the host's inbox, which opens it for everyone.
+    h.state_mut().dialog.as_mut().unwrap().values.insert("password".into(), json!(PW));
+    h.get_by_label("   OK   ").click();
+    h.run_steps(3);
+    assert_eq!(dialog(&h), None);
+    assert!(h.state().message.is_none());
+    let arrived = std::mem::take(&mut *inbox.lock().unwrap());
+    assert_eq!(arrived.len(), 1);
+    assert_eq!(arrived[0].0, "Secret.xlsx");
+    assert!(!arrived[0].1.windows(PW.len()).any(|w| w == PW.as_bytes()), "the password isn't in what the host gets");
+    let (wb, _) = gridcraft_engine::io::open_bytes("Secret.xlsx", &arrived[0].1).unwrap();
+    assert_eq!(wb.active().unwrap().value(CellRef::parse("A1").unwrap()), Value::Number(42.0));
+    assert_eq!(h.state().session.documents().len(), before, "the host opens it, not the app");
+}

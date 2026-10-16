@@ -343,6 +343,21 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Close" => "Fermer",
         "Options" => "Options",
         "Blank workbook" => "Classeur vide",
+        // webxdc: the start screen and Replace with File.
+        "Start a workbook" => "Commencer un classeur",
+        "Everyone in this chat works on the same workbook." => "Tous les membres de ce chat travaillent sur le même classeur.",
+        "New blank workbook" => "Nouveau classeur vide",
+        "Start with empty sheets." => "Commencer avec des feuilles vides.",
+        "Open a file" => "Ouvrir un fichier",
+        "Share a workbook from this device with the chat." => "Partager avec le chat un classeur de cet appareil.",
+        "Replace with File…" => "Remplacer par un fichier…",
+        "Replace Workbook" => "Remplacer le classeur",
+        "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
+            "Le fichier remplace ce classeur pour tous les membres du chat. Annuler rétablit le classeur."
+        }
+        "Replace" => "Remplacer",
+        "Choose File…" => "Choisir un fichier…",
+        "Cancel" => "Annuler",
         "Recent" => "Récent",
         "No recent workbooks yet." => "Aucun classeur récent pour le moment.",
         "More workbooks" => "Plus de classeurs",
