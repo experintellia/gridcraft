@@ -643,7 +643,9 @@ fn info(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage) {
                 if !ui.ctx().memory(|m| m.has_focus(id)) {
                     bs.name.clone_from(&title);
                 }
-                let resp = ui.add(egui::TextEdit::singleline(&mut bs.name).id(id).font(theme::ui_bold(16.0)).text_color(t.text).desired_width(360.0));
+                let resp = crate::text_zone(
+                    ui.add(egui::TextEdit::singleline(&mut bs.name).id(id).font(theme::ui_bold(16.0)).text_color(t.text).desired_width(360.0)),
+                );
                 if resp.lost_focus() && !bs.name.trim().is_empty() && bs.name.trim() != title {
                     app.run_or_alert("file.rename", json!({"name": bs.name.clone()}));
                 }
@@ -690,7 +692,7 @@ fn info(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage) {
             if !ui.ctx().memory(|m| m.has_focus(id)) {
                 draft.clone_from(saved);
             }
-            let resp = ui.add(egui::TextEdit::singleline(draft).id(id).desired_width(360.0));
+            let resp = crate::text_zone(ui.add(egui::TextEdit::singleline(draft).id(id).desired_width(360.0)));
             if resp.lost_focus() && draft != saved {
                 let mut params = serde_json::Map::new();
                 params.insert((*key).to_string(), json!(draft.clone()));

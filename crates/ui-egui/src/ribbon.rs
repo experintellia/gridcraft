@@ -437,7 +437,7 @@ pub(crate) fn editable_combo(
             });
         }
         let text_id = anchor.id.with(salt).with("__combo_text");
-        let te = ui.add(egui::TextEdit::singleline(&mut st.text).id(text_id).desired_width(220.0).hint_text("Type to filter…"));
+        let te = crate::text_zone(ui.add(egui::TextEdit::singleline(&mut st.text).id(text_id).desired_width(220.0).hint_text("Type to filter…")));
         if open_now && !te.has_focus() {
             ui.ctx().memory_mut(|m| m.request_focus(text_id));
             // Select all once focus lands so typing replaces the filter.
