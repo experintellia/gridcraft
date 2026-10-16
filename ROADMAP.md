@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-15 · **Change:** minor (webxdc build: no Save or Print; phone-width ribbon tabs and dialogs) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-15 · **Change:** minor (webxdc build: opening a chat starts from a shared copy of the workbook) · **Target:** Microsoft Excel (Microsoft 365)
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.
@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-15 | webxdc build: every 256 edits, the member whose edit crossed the line posts a full copy of the shared workbook (when it fits in the messenger's update size limit); opening the app loads the latest copy that matches the edit log and replays only the edits after it, instead of the whole chat history (#4). Chats and builds without copies replay everything as before |
 | 2026-10-15 | webxdc build: File leaves out Save (Save As hands a copy to the chat) and Print (no print dialog in the messenger), and AutoSave is gone on the web. On a phone the ribbon's tab row swipes sideways and dialogs (the command palette included) fit the screen |
 | 2026-10-13 | webxdc build (`packaging/webxdc/package.sh`): everyone in a Delta Chat chat edits one shared workbook. Edits replicate as commands ordered by a Yjs array (`yrs`) and replay on every member; paste and Format Painter ship the workbook they leave; opening a file replaces the shared workbook; Save sends the file to the chat; members see each other's selections live (realtime channel); one workbook per chat: a start screen (blank workbook or a file) until someone starts it, no New/Open/samples/window commands after, and replacing it with a file asks first |
 | 2026-10-12 | Rows auto-fit oversized fonts: opening a file and whole-row/column formatting grow non-custom rows to their tallest font (#833) |
@@ -195,6 +196,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-15 | minor | Progress log: webxdc start-up from shared copies of the workbook (#4) |
 | 2026-10-13 | minor | Progress log: webxdc build with shared editing |
 | 2026-10-12 | minor | Rows auto-fit oversized fonts on open and whole-row/column formatting (#833); progress log row |
 | 2026-10-12 | minor | Progress log: multi-area row/column delete (#758) |
