@@ -74,3 +74,34 @@ fn the_command_palette_fits() {
     let r = h.ctx.memory(|m| m.area_rect(egui::Id::new("dialog").with("commandSearch"))).expect("palette");
     assert!(r.left() >= 0.0 && r.right() <= 390.0, "{r:?}");
 }
+
+/// The formula bar's text field (its keyboard zone) on a phone, at the given interface size.
+fn formula_field(width: f32, percent: u32) -> egui::Rect {
+    let mut h = phone();
+    h.state_mut().run("view.interfaceScale", serde_json::json!({ "percent": percent })).unwrap();
+    h.set_size(egui::vec2(width, 844.0));
+    h.run_steps(4);
+    let grid_top = h.state().grid.rect.unwrap().top();
+    gridcraft_ui_egui::keyboard_zones(&h.ctx).into_iter().find(|z| z.bottom() <= grid_top).expect("formula bar zone")
+}
+
+#[test]
+fn the_formula_field_keeps_its_width() {
+    // 390 px at 100%, at 170% (229 points), and the narrowest a phone gets (a 390 px canvas at 200%: 195 points).
+    for (width, percent) in [(390.0, 100), (390.0, 170), (390.0, 200)] {
+        let field = formula_field(width, percent);
+        let points = width / (percent as f32 / 100.0);
+        assert!(field.width() >= 80.0 && field.right() <= points, "{width} px at {percent}%: {field:?}");
+    }
+}
+
+#[test]
+fn a_formula_bar_with_no_room_does_not_panic() {
+    let mut h = phone();
+    h.state_mut().run("view.interfaceScale", serde_json::json!({ "percent": 200 })).unwrap();
+    h.set_size(egui::vec2(120.0, 844.0));
+    h.run_steps(2);
+    h.state_mut().begin_edit(None, true);
+    h.run_steps(2);
+    assert!(h.state().editor.is_some());
+}
