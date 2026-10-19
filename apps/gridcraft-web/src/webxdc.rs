@@ -213,10 +213,12 @@ impl Webxdc {
                     app.backstage = None;
                 }
                 // The Password dialog decrypts it and puts the plain file back in the inbox: the
-                // password stays on this device, only the workbook is shared.
+                // password stays on this device, only the workbook is shared. Picked with no
+                // workbook yet (`blank`), it asks before replacing one started meanwhile.
                 Err(e) if e.to_string().contains(gridcraft_engine::io::PASSWORD_REQUIRED) => {
                     app.backstage = None;
-                    app.open_dialog("openPassword", serde_json::json!({"name": name, "base64": base64_encode(&bytes)}));
+                    let blank = self.collab.is_empty() && self.replayed.get();
+                    app.open_dialog("openPassword", serde_json::json!({"name": name, "base64": base64_encode(&bytes), "blank": blank}));
                 }
                 Err(e) => app.message = Some(("GridCraft".into(), gridcraft_ui_egui::clean_error(&e.to_string()))),
             }

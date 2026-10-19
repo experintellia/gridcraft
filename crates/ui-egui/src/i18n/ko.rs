@@ -357,6 +357,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
             "이 파일이 채팅의 모든 사람에게 이 통합 문서를 대체합니다. 실행 취소하면 통합 문서가 복원됩니다."
         }
+        "Everyone in the chat gets this workbook without its password." => "채팅의 모든 사람이 암호 없이 이 통합 문서를 받습니다.",
         "Replace" => "바꾸기",
         "Choose File…" => "파일 선택…",
         "Cancel" => "취소",

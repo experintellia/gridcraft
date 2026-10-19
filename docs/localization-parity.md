@@ -78,7 +78,7 @@ language (none so far) and of localized function names.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-16 | minor | The webxdc build's start screen, File › Replace with File and its Replace Workbook dialog (12 labels, Cancel among them) are in every catalog |
+| 2026-10-16 | minor | The webxdc build's start screen, File › Replace with File and its Replace Workbook dialog (12 labels, Cancel among them) and the Password dialog's note that the chat gets the workbook without its password are in every catalog |
 | 2026-10-12 | minor | Format Cells looks up its tabs, labels, options and note through `Language::tr` (Fill tab keyed `Format Cells\|Fill`); dialog titles and OK/Cancel too. Labels already in a table (Number, Currency, Fill…) show translated; the rest fall back to English until the tables add them |
 | 2026-10-12 | minor | Brazilian Portuguese catalog (`i18n/pt.rs`) grows from 377 to 923 entries: every key the other catalogs translate, including the dialog strings #669 starts looking up (~42%) |
 | 2026-10-11 | minor | German ribbon catalog (`i18n/de.rs`, 266 labels, ~12%); `de` locale tags (de-DE, de-AT, de-CH…) resolve to German. PR #163 (localized German formulas/numbers) still open |

@@ -533,6 +533,7 @@ const JAPANESE: &[(&str, &str)] = &[
         "The file replaces this workbook for everyone in the chat. Undo brings the workbook back.",
         "このファイルで、チャットの全員のブックが置き換わります。元に戻すとブックが復元されます。",
     ),
+    ("Everyone in the chat gets this workbook without its password.", "チャットの全員が、パスワードなしでこのブックを受け取ります。"),
     ("Replace", "置き換え"),
     ("Choose File…", "ファイルを選択…"),
     ("Cancel", "キャンセル"),
@@ -665,6 +666,7 @@ mod tests {
         assert_eq!(Language::De.tr("Start a workbook"), "Arbeitsmappe beginnen");
         assert_eq!(Language::Fr.tr("Replace Workbook"), "Remplacer le classeur");
         assert_eq!(Language::Ja.tr("Cancel"), "キャンセル");
+        assert_eq!(Language::De.tr(crate::dialogs::CHAT_COPY_NOTICE), "Alle im Chat erhalten diese Arbeitsmappe ohne Kennwort.");
     }
 
     #[test]

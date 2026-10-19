@@ -355,6 +355,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
             "该文件将为聊天中的所有人替换此工作簿。撤消可恢复工作簿。"
         }
+        "Everyone in the chat gets this workbook without its password." => "聊天中的所有人都会收到不带密码的此工作簿。",
         "Replace" => "替换",
         "Choose File…" => "选择文件…",
         "Cancel" => "取消",

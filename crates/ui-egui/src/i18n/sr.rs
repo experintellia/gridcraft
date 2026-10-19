@@ -349,6 +349,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
             "Datoteka zamenjuje ovu radnu svesku za sve u četu. Opozovi vraća radnu svesku."
         }
+        "Everyone in the chat gets this workbook without its password." => "Svi u četu dobijaju ovu radnu svesku bez lozinke.",
         "Replace" => "Zameni",
         "Choose File…" => "Izaberi datoteku…",
         "Cancel" => "Otkaži",

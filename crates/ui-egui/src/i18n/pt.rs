@@ -358,6 +358,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
             "O arquivo substitui esta pasta de trabalho para todos no chat. Desfazer traz a pasta de trabalho de volta."
         }
+        "Everyone in the chat gets this workbook without its password." => "Todos no chat recebem esta pasta de trabalho sem a senha.",
         "Choose File…" => "Escolher Arquivo…",
         "Recent" => "Recentes",
         "No recent workbooks yet." => "Ainda não há pastas de trabalho recentes.",

@@ -271,6 +271,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
             "Soubor nahradí tento sešit všem v chatu. Akce Zpět sešit vrátí."
         }
+        "Everyone in the chat gets this workbook without its password." => "Všichni v chatu dostanou tento sešit bez hesla.",
         "Replace" => "Nahradit",
         "Choose File…" => "Vybrat soubor…",
         "Recent" => "Naposledy použité",

@@ -59,6 +59,7 @@ fn opening_an_encrypted_file_asks_for_its_password() {
     assert_eq!(dialog(&h).as_deref(), Some("openPassword"));
     assert!(h.state().message.is_none(), "no error box: the dialog asks instead");
     assert!(h.query_by_role(Role::PasswordInput).is_some(), "the password is masked");
+    assert!(h.query_by_label(gridcraft_ui_egui::dialogs::CHAT_COPY_NOTICE).is_none(), "no chat here");
 
     // A wrong password says so, clears the field, and keeps the dialog and its file.
     h.get_by_role(Role::PasswordInput).click();
@@ -180,6 +181,8 @@ fn a_single_document_host_gets_the_decrypted_file_not_the_password() {
     let before = h.state().session.documents().len();
     h.state_mut().open_dialog("openPassword", json!({"name": "Secret.xlsx", "base64": gridcraft_engine::io::base64_encode(&encrypted_bytes())}));
     h.run_steps(3);
+    // It says the chat gets the workbook without the password, before OK shares it.
+    assert!(h.query_by_label(gridcraft_ui_egui::dialogs::CHAT_COPY_NOTICE).is_some());
     // A wrong password says so and keeps asking; nothing reaches the host.
     h.state_mut().dialog.as_mut().unwrap().values.insert("password".into(), json!("wrong-guess"));
     h.get_by_label("   OK   ").click();
@@ -203,4 +206,35 @@ fn a_single_document_host_gets_the_decrypted_file_not_the_password() {
     let (wb, _) = gridcraft_engine::io::open_bytes("Secret.xlsx", &arrived[0].1).unwrap();
     assert_eq!(wb.active().unwrap().value(CellRef::parse("A1").unwrap()), Value::Number(42.0));
     assert_eq!(h.state().session.documents().len(), before, "the host opens it, not the app");
+}
+
+/// webxdc: a file picked on the start screen (`blank`) that another member's new workbook beat
+/// to the chat asks before replacing it, like any other file.
+#[test]
+fn a_password_file_picked_on_the_start_screen_asks_before_replacing_a_new_workbook() {
+    let inbox: Inbox = Default::default();
+    let mut h = harness(Services { single_document: true, inbox: Some(inbox.clone()), ..Default::default() });
+    let b64 = gridcraft_engine::io::base64_encode(&encrypted_bytes());
+    let ok = |h: &mut egui_kittest::Harness<'static, SheetApp>| {
+        h.state_mut().open_dialog("openPassword", json!({"name": "Secret.xlsx", "base64": b64, "blank": true}));
+        h.state_mut().dialog.as_mut().unwrap().values.insert("password".into(), json!(PW));
+        h.run_steps(3);
+        h.get_by_label("   OK   ").click();
+        h.run_steps(3);
+    };
+    // Still no workbook when OK is pressed: the file goes straight to the host.
+    h.state_mut().start = gridcraft_ui_egui::Start::Shown;
+    ok(&mut h);
+    assert_eq!(dialog(&h), None);
+    assert_eq!(std::mem::take(&mut *inbox.lock().unwrap()).len(), 1);
+    // Someone started one while the password was being typed: Replace Workbook asks first.
+    h.state_mut().start = gridcraft_ui_egui::Start::Off;
+    ok(&mut h);
+    assert_eq!(dialog(&h).as_deref(), Some("replaceWorkbook"));
+    assert!(inbox.lock().unwrap().is_empty());
+    h.get_by_label("Replace").click();
+    h.run_steps(3);
+    let arrived = std::mem::take(&mut *inbox.lock().unwrap());
+    assert_eq!(arrived.len(), 1);
+    assert!(gridcraft_engine::io::open_bytes("Secret.xlsx", &arrived[0].1).is_ok(), "the decrypted file");
 }
