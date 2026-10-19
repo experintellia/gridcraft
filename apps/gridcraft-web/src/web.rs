@@ -98,6 +98,7 @@ fn keyboard_on_tap(ctx: egui::Context) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
     let touch_screen = web_sys::window().and_then(|w| w.match_media("(pointer: coarse)").ok().flatten()).is_some_and(|m| m.matches());
     if touch_screen {
+        gridcraft_ui_egui::set_touch_screen(&ctx, true);
         // Without `path()` clips (Android WebView before Chrome 88) the input would cover everything between the zones.
         let clips = web_sys::css::supports_with_value("clip-path", "path('M0 0')").unwrap_or(false);
         ctx.on_end_pass("gridcraft.text_input", std::sync::Arc::new(move |ui: &mut egui::Ui| place_text_input(ui.ctx(), clips)));
@@ -127,6 +128,11 @@ fn keyboard_on_tap(ctx: egui::Context) {
         let p = canvas_point(&ctx, &canvas, t.client_x(), t.client_y());
         let target = e.target();
         if target.as_ref() == Some(input.as_ref()) {
+            // Still focused, with the keyboard kept up after Enter: no focus event follows, so edit (or focus) now.
+            if web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()).as_ref() == Some(input.as_ref()) {
+                gridcraft_ui_egui::tap_text_zone(&ctx, p);
+                return;
+            }
             // iOS focuses the input after `touchend`, where its tap lands then: editing now would move the input
             // away from under that tap first, and the keyboard would stay down.
             tapped_end.set(Some(p));
