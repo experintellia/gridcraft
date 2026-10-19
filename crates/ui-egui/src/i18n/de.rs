@@ -257,6 +257,22 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Close" => "Schließen",
         "Options" => "Optionen",
         "Blank workbook" => "Leere Arbeitsmappe",
+        // webxdc: the start screen and Replace with File.
+        "Start a workbook" => "Arbeitsmappe beginnen",
+        "Everyone in this chat works on the same workbook." => "Alle in diesem Chat arbeiten an derselben Arbeitsmappe.",
+        "New blank workbook" => "Neue leere Arbeitsmappe",
+        "Start with empty sheets." => "Mit leeren Tabellenblättern beginnen.",
+        "Open a file" => "Datei öffnen",
+        "Share a workbook from this device with the chat." => "Eine Arbeitsmappe von diesem Gerät im Chat teilen.",
+        "Replace with File…" => "Durch Datei ersetzen…",
+        "Replace Workbook" => "Arbeitsmappe ersetzen",
+        "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
+            "Die Datei ersetzt diese Arbeitsmappe für alle im Chat. Rückgängig holt die Arbeitsmappe zurück."
+        }
+        "Everyone in the chat gets this workbook without its password." => "Alle im Chat erhalten diese Arbeitsmappe ohne Kennwort.",
+        "Replace" => "Ersetzen",
+        "Choose File…" => "Datei auswählen…",
+        "Cancel" => "Abbrechen",
         "Recent" => "Zuletzt verwendet",
         "No recent workbooks yet." => "Noch keine zuletzt verwendeten Arbeitsmappen.",
         "More workbooks" => "Weitere Arbeitsmappen",

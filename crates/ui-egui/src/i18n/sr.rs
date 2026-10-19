@@ -337,6 +337,22 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Close" => "Zatvori",
         "Options" => "Opcije",
         "Blank workbook" => "Prazna radna sveska",
+        // webxdc: the start screen and Replace with File.
+        "Start a workbook" => "Započni radnu svesku",
+        "Everyone in this chat works on the same workbook." => "Svi u ovom četu rade na istoj radnoj svesci.",
+        "New blank workbook" => "Nova prazna radna sveska",
+        "Start with empty sheets." => "Počni sa praznim listovima.",
+        "Open a file" => "Otvori datoteku",
+        "Share a workbook from this device with the chat." => "Podeli u četu radnu svesku sa ovog uređaja.",
+        "Replace with File…" => "Zameni datotekom…",
+        "Replace Workbook" => "Zamena radne sveske",
+        "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
+            "Datoteka zamenjuje ovu radnu svesku za sve u četu. Opozovi vraća radnu svesku."
+        }
+        "Everyone in the chat gets this workbook without its password." => "Svi u četu dobijaju ovu radnu svesku bez lozinke.",
+        "Replace" => "Zameni",
+        "Choose File…" => "Izaberi datoteku…",
+        "Cancel" => "Otkaži",
         "Recent" => "Nedavno",
         "No recent workbooks yet." => "Još nema nedavnih radnih svezaka.",
         "More workbooks" => "Više radnih svezaka",
