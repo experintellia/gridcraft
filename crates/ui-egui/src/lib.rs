@@ -1374,6 +1374,27 @@ pub fn tap_cell_zone(ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
+/// The events eframe sends for a finger on its canvas, at `pos` (points): a primary press as it lands, moves, a
+/// release as it lifts. The web shell sends them itself for a drag that began on its text input over [`cell_zone`],
+/// which eframe's canvas listeners never see.
+pub fn finger_events(phase: egui::TouchPhase, id: egui::TouchId, pos: egui::Pos2) -> Vec<egui::Event> {
+    use egui::{Event, PointerButton, TouchPhase};
+    let button = |pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    let touch = Event::Touch { device_id: egui::TouchDeviceId(0), id, phase, pos, force: None };
+    match phase {
+        TouchPhase::Start => vec![button(true), touch],
+        TouchPhase::Move => vec![Event::PointerMoved(pos), touch],
+        TouchPhase::End | TouchPhase::Cancel => vec![button(false), Event::PointerGone, touch],
+    }
+}
+
+/// A long press at `pos` (points), as the secondary click that opens the context menu, for a long press on the web
+/// shell's text input over [`cell_zone`].
+pub fn long_press_events(pos: egui::Pos2) -> Vec<egui::Event> {
+    let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE };
+    vec![egui::Event::PointerMoved(pos), button(true), button(false)]
+}
+
 /// Publishes the active cell's keyboard zone (none while the cell doesn't show or keeps its tap); true when its text
 /// input was tapped since the last frame.
 pub(crate) fn cell_keyboard_zone(ctx: &egui::Context, rect: Option<egui::Rect>) -> bool {
