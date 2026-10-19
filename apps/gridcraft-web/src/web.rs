@@ -172,7 +172,7 @@ enum Gesture {
 #[derive(Clone, Copy)]
 struct CellTouch {
     id: i32,
-    /// Where it began, in CSS pixels.
+    /// Where it began (a drag: where it is now), in CSS pixels.
     x: i32,
     y: i32,
     gesture: Gesture,
@@ -216,23 +216,31 @@ fn forward_cell_gestures(ctx: egui::Context) -> Rc<Cell<Vec<egui::Event>>> {
         (0..e.changed_touches().length()).filter_map(|i| e.changed_touches().get(i)).find(|t| t.identifier() == id)
     };
 
-    // Held still as long as egui waits for a long press elsewhere on the grid.
-    let on_hold = Closure::<dyn FnMut()>::new({
+    // A waiting tap held still turns into a long press.
+    let long_press = {
         let (touch, send, at) = (touch.clone(), send.clone(), at.clone());
-        move || {
+        Rc::new(move || {
             let Some(t) = touch.get().filter(|t| t.gesture == Gesture::Tap) else { return };
             touch.set(Some(CellTouch { gesture: Gesture::LongPress, ..t }));
             send(gridcraft_ui_egui::long_press_events(at(t.x, t.y)));
-        }
+        })
+    };
+    // Held still as long as egui waits for a long press elsewhere on the grid.
+    let on_hold = Closure::<dyn FnMut()>::new({
+        let long_press = long_press.clone();
+        move || long_press()
     });
     let hold_ms = ctx.options(|o| o.input_options.max_click_duration * 1000.0).clamp(0.0, 10_000.0) as i32;
     let on_start = Closure::<dyn FnMut(web_sys::TouchEvent)>::new({
-        let (touch, window) = (touch.clone(), window.clone());
+        let (touch, window, send, at) = (touch.clone(), window.clone(), send.clone(), at.clone());
         let hold: js_sys::Function = on_hold.as_ref().unchecked_ref::<js_sys::Function>().clone();
         move |e: web_sys::TouchEvent| {
-            // Another finger makes a waiting tap a pinch.
-            if let Some(t) = touch.get().filter(|t| t.gesture == Gesture::Tap) {
+            // Another finger makes a waiting tap or a drag a pinch, which eframe's own listeners handle.
+            if let Some(t) = touch.get().filter(|t| t.gesture != Gesture::LongPress) {
                 window.clear_timeout_with_handle(t.timer);
+                if t.gesture == Gesture::Drag {
+                    send(gridcraft_ui_egui::finger_events(egui::TouchPhase::Cancel, t.id.into(), at(t.x, t.y)));
+                }
                 touch.set(None);
             }
             let on_input = canvas_and_input().is_some_and(|(_, input)| e.target().as_ref() == Some(input.as_ref()));
@@ -258,6 +266,7 @@ fn forward_cell_gestures(ctx: egui::Context) -> Rc<Cell<Vec<egui::Event>>> {
             }
             if t.gesture == Gesture::Drag {
                 send(gridcraft_ui_egui::finger_events(egui::TouchPhase::Move, t.id.into(), at(now.client_x(), now.client_y())));
+                touch.set(Some(CellTouch { x: now.client_x(), y: now.client_y(), ..t }));
             }
             e.prevent_default();
             e.stop_propagation();
@@ -285,6 +294,29 @@ fn forward_cell_gestures(ctx: egui::Context) -> Rc<Cell<Vec<egui::Event>>> {
             e.stop_propagation();
         }
     });
+    // Android's own long press comes sooner than egui's (a `contextmenu`, then the text field's popup): it makes a
+    // waiting tap a long press at once, without the popup.
+    let on_menu = Closure::<dyn FnMut(web_sys::Event)>::new({
+        let (touch, window) = (touch.clone(), window.clone());
+        move |e: web_sys::Event| {
+            let on_input = canvas_and_input().is_some_and(|(_, input)| e.target().as_ref() == Some(input.as_ref()));
+            let Some(t) = touch.get().filter(|_| on_input) else { return };
+            window.clear_timeout_with_handle(t.timer);
+            long_press();
+            e.prevent_default();
+            e.stop_propagation();
+        }
+    });
+    // Pointer events come first: eframe's `pointerup` on the document would release a forwarded drag ahead of its
+    // `touchend` (with moves still queued here). The `touchend` alone releases it.
+    let on_up = Closure::<dyn FnMut(web_sys::PointerEvent)>::new({
+        let touch = touch.clone();
+        move |e: web_sys::PointerEvent| {
+            if e.pointer_type() == "touch" && touch.get().is_some_and(|t| t.gesture == Gesture::Drag) {
+                e.stop_propagation();
+            }
+        }
+    });
     // Capturing, ahead of eframe's listeners on the document, and not passive, so the browser's handling can be prevented.
     let options = web_sys::AddEventListenerOptions::new();
     options.set_capture(true);
@@ -292,11 +324,15 @@ fn forward_cell_gestures(ctx: egui::Context) -> Rc<Cell<Vec<egui::Event>>> {
     for (name, f) in [("touchstart", &on_start), ("touchmove", &on_move), ("touchend", &on_end), ("touchcancel", &on_end)] {
         let _ = document.add_event_listener_with_callback_and_add_event_listener_options(name, f.as_ref().unchecked_ref(), &options);
     }
+    let _ = document.add_event_listener_with_callback_and_add_event_listener_options("contextmenu", on_menu.as_ref().unchecked_ref(), &options);
+    let _ = document.add_event_listener_with_callback_and_add_event_listener_options("pointerup", on_up.as_ref().unchecked_ref(), &options);
     // Listening for the page's lifetime.
     on_hold.forget();
     on_start.forget();
     on_move.forget();
     on_end.forget();
+    on_menu.forget();
+    on_up.forget();
     events
 }
 
@@ -341,6 +377,8 @@ fn place_cell_input(ctx: &egui::Context) {
             let zoom = ctx.zoom_factor();
             let _ = style.set_property("left", &format!("{}px", canvas.offset_left() as f32 + z.left() * zoom));
             let _ = style.set_property("top", &format!("{}px", canvas.offset_top() as f32 + z.top() * zoom));
+            // No iOS callout on a long press. (Not `user-select: none`: iOS then types nothing into the input.)
+            let _ = style.set_property("-webkit-touch-callout", "none");
             (z.width() * zoom, z.height() * zoom)
         }
         None => (1.0, 1.0),
