@@ -2641,9 +2641,10 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
             .filter(|r| r.is_positive())
             .max_by(|a, b| a.area().total_cmp(&b.area()))
             .map(|r| geo.mirror_rect(r));
-        let covered = |z: Rect| egui::Popup::is_any_open(ctx) || !ctx.layer_id_at(z.center()).is_some_and(|l| l.order == egui::Order::Background);
         let keeps_tap = is_checkbox(sh, app) || sh.hyperlinks.contains_key(&active) || sh.has_filter_button(active);
-        let zone = visible.filter(|z| !covered(*z) && !keeps_tap);
+        let menu = egui::Popup::is_any_open(ctx);
+        let on_top = |z: &Rect| ctx.layer_id_at(z.center()).is_some_and(|l| l.order == egui::Order::Background);
+        let zone = visible.filter(|z| !menu && !keeps_tap && on_top(z));
         if crate::cell_keyboard_zone(ctx, zone) {
             app.begin_edit(None, false);
             app.grid.touch_typing = true;
@@ -2651,9 +2652,12 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
             return;
         }
         // After Enter or Tab the keyboard stays up for the next cell (its input must stay focused for iOS to keep
-        // it), and typing edits that cell, until a tap or scroll gesture, or the cell is covered or out of view.
+        // it), and typing edits that cell, until a tap or scroll gesture, a menu, or the cell is out of view. Only on
+        // a touch screen. Other layers don't end it: the just-closed editor's hint and autocomplete areas still
+        // count as over the next cell for a frame.
         if app.grid.touch_typing {
-            match zone.filter(|_| ctx.input(|i| i.focused && !i.pointer.any_pressed())) {
+            let keep = !menu && !keeps_tap && crate::touch_screen(ctx) && ctx.input(|i| i.focused && !i.pointer.any_pressed());
+            match visible.filter(|_| keep) {
                 Some(z) => crate::keep_keyboard(ctx, z),
                 None => app.grid.touch_typing = false,
             }
@@ -2670,7 +2674,7 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
             if !m.alt && (m.ctrl || m.command || (m.shift && *key == egui::Key::Space)))
     });
     let page = ((geo.cells.height() / geo.z) / sh.default_row_height).floor().max(1.0) as i64;
-    for ev in events {
+    for (index, ev) in events.iter().cloned().enumerate() {
         match ev {
             egui::Event::Copy => {
                 app.copy_to_clipboard(ctx, "edit.copy");
@@ -2680,11 +2684,19 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
             }
             egui::Event::Paste(text) => app.paste_external(text),
             egui::Event::Text(_) if shortcut_pressed => {}
-            egui::Event::Text(text) if text.chars().all(|c| !c.is_control()) && !text.is_empty() => {
+            egui::Event::Text(text) | egui::Event::Ime(egui::ImeEvent::Commit(text)) if text.chars().all(|c| !c.is_control()) && !text.is_empty() => {
                 app.begin_edit(Some(text), false);
                 if let Some(ed) = app.editor.as_mut() {
                     ed.caret = ed.text.chars().count();
                 }
+                return;
+            }
+            // A composing keyboard (CJK, Android's with suggestions) starts a word: the edit's text field takes it
+            // over next frame, once it has focus.
+            egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) if !text.is_empty() => {
+                app.begin_edit(Some(String::new()), false);
+                let rest = events.get(index..).unwrap_or_default().iter();
+                app.synthetic.push_front(rest.filter(|e| matches!(e, egui::Event::Ime(_) | egui::Event::Text(_))).cloned().collect());
                 return;
             }
             egui::Event::Key { key, physical_key, pressed: true, modifiers: m, .. } => {

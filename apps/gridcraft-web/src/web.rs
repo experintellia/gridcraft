@@ -98,6 +98,7 @@ fn keyboard_on_tap(ctx: egui::Context) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
     let touch_screen = web_sys::window().and_then(|w| w.match_media("(pointer: coarse)").ok().flatten()).is_some_and(|m| m.matches());
     if touch_screen {
+        gridcraft_ui_egui::set_touch_screen(&ctx, true);
         ctx.on_end_pass("gridcraft.cell_input", std::sync::Arc::new(|ui: &mut egui::Ui| place_cell_input(ui.ctx())));
         unpan_after_keyboard();
     }
