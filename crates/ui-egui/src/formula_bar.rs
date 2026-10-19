@@ -123,9 +123,19 @@ fn name_box(app: &mut SheetApp, ui: &mut egui::Ui, t: &Tokens) {
     ui.painter().rect_filled(rect, 4.0, t.input_bg);
     ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, t.input_border), StrokeKind::Inside);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(rect.min + vec2(6.0, 3.0), vec2(96.0, 18.0))));
-    let resp = child.add(TextEdit::singleline(&mut text).id(id).frame(egui::Frame::NONE).font(theme::ui_font(13.0)).desired_width(96.0));
+    let resp =
+        crate::text_zone(child.add(TextEdit::singleline(&mut text).id(id).frame(egui::Frame::NONE).font(theme::ui_font(13.0)).desired_width(96.0)));
     if resp.gained_focus() {
         app.name_box = Some(shown.clone());
+        // Typing replaces the reference. A tap on a touch screen focuses the box without placing a cursor; a press of
+        // the pointer has placed it (and may drag a selection from there).
+        if !resp.is_pointer_button_down_on()
+            && let Some(mut state) = TextEdit::load_state(ui.ctx(), id)
+        {
+            let all = egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(text.chars().count()));
+            state.cursor.set_char_range(Some(all));
+            state.store(ui.ctx(), id);
+        }
     }
     if resp.changed() {
         app.name_box = Some(text.clone());

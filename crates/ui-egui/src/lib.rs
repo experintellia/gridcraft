@@ -1170,14 +1170,22 @@ impl SheetApp {
     /// Lays out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        ctx.data_mut(|d| {
+        let tapped_field = ctx.data_mut(|d| {
             d.remove::<Vec<egui::Rect>>(egui::Id::new(KEYBOARD_ZONES));
             d.remove::<egui::Rect>(egui::Id::new(CELL_ZONE));
+            d.remove::<Vec<TextZone>>(egui::Id::new(TEXT_ZONES));
             // A tap reported while editing (eframe focusing its input itself) must not edit again afterwards.
             if self.editor.is_some() {
                 d.remove::<bool>(egui::Id::new(CELL_TAPPED));
             }
+            let field = d.get_temp::<egui::Id>(egui::Id::new(FIELD_TAPPED));
+            d.remove::<egui::Id>(egui::Id::new(FIELD_TAPPED));
+            field
         });
+        // Focused within the pass, so that the field sees it gain focus.
+        if let Some(id) = tapped_field {
+            ctx.memory_mut(|m| m.request_focus(id));
+        }
         self.poll_printing(&ctx);
         if !self.fonts_ready || self.fonts_rebind {
             ctx.request_repaint();
@@ -1400,6 +1408,7 @@ pub fn long_press_events(pos: egui::Pos2) -> Vec<egui::Event> {
 pub(crate) fn cell_keyboard_zone(ctx: &egui::Context, rect: Option<egui::Rect>) -> bool {
     if let Some(rect) = rect {
         add_keyboard_zone(ctx, rect);
+        add_text_zone(ctx, (rect, egui::Id::new(CELL_ZONE), egui::LayerId::background()));
     }
     ctx.data_mut(|d| {
         if let Some(rect) = rect {
@@ -1407,6 +1416,68 @@ pub(crate) fn cell_keyboard_zone(ctx: &egui::Context, rect: Option<egui::Rect>) 
         }
         d.remove_temp::<bool>(egui::Id::new(CELL_TAPPED)).is_some()
     })
+}
+
+/// Where a tap types this frame, in points: the active cell and the text fields no other layer covers. On touch
+/// screens the web shell lays its text input over these, so that the tap focuses it natively (as over [`cell_zone`])
+/// and reports it with [`tap_text_zone`]. Only the active cell while the keyboard takes typing (kept up after Enter
+/// for the next cell; a text field's or a cell edit's publishes no cell zone): the input then follows the cursor.
+/// Read at the end of the pass, which knows whether a text field took typing.
+pub fn text_zones(ctx: &egui::Context) -> Vec<egui::Rect> {
+    let typing = ctx.output(|o| o.ime.is_some());
+    shown_text_zones(ctx).into_iter().filter(|(_, id)| !typing || *id == egui::Id::new(CELL_ZONE)).map(|(rect, _)| rect).collect()
+}
+
+/// The text input over [`text_zones`] was tapped at `p` (points): the next frame edits the active cell or focuses the
+/// text field there. Returns the zone tapped.
+pub fn tap_text_zone(ctx: &egui::Context, p: egui::Pos2) -> Option<egui::Rect> {
+    let (rect, id) = shown_text_zones(ctx).into_iter().find(|(rect, _)| rect.contains(p))?;
+    if id == egui::Id::new(CELL_ZONE) {
+        tap_cell_zone(ctx);
+    } else {
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(FIELD_TAPPED), id));
+        ctx.request_repaint();
+    }
+    Some(rect)
+}
+
+/// Publishes a text field's response as one of the [`text_zones`].
+pub(crate) fn text_zone(resp: egui::Response) -> egui::Response {
+    if resp.enabled() {
+        add_text_zone(&resp.ctx, (resp.interact_rect, resp.id, resp.layer_id));
+    }
+    resp
+}
+
+type TextZone = (egui::Rect, egui::Id, egui::LayerId);
+
+fn add_text_zone(ctx: &egui::Context, zone: TextZone) {
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<TextZone>>(egui::Id::new(TEXT_ZONES)).push(zone));
+}
+
+/// The text zones no window, menu or popup covers, even in part: their layer takes a tap at their centre (so no modal
+/// dialog is over them) and no interactable layer above it overlaps them.
+fn shown_text_zones(ctx: &egui::Context) -> Vec<(egui::Rect, egui::Id)> {
+    let zones: Vec<TextZone> = ctx.data(|d| d.get_temp(egui::Id::new(TEXT_ZONES))).unwrap_or_default();
+    // Back to front. The root layer (the grid, the formula bar) is no area, so isn't listed: every higher order is above it.
+    let layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().filter(|l| m.areas().is_visible(l)).collect());
+    let covered = |r: egui::Rect, layer: egui::LayerId| {
+        let at = layers.iter().position(|l| *l == layer);
+        layers
+            .iter()
+            .enumerate()
+            .filter(|(i, l)| at.map_or(l.order > layer.order, |at| *i > at))
+            .filter_map(|(_, l)| egui::AreaState::load(ctx, l.id))
+            .any(|a| a.interactable && a.rect().intersects(r))
+    };
+    zones
+        .into_iter()
+        .filter(|(rect, _, layer)| {
+            let r = rect.shrink(1.0);
+            r.is_positive() && ctx.layer_id_at(r.center()) == Some(*layer) && !covered(r, *layer)
+        })
+        .map(|(rect, id, _)| (rect, id))
+        .collect()
 }
 
 /// The web shell runs on a touch screen: after Enter or Tab the on-screen keyboard stays up for the next cell. Off
@@ -1420,6 +1491,8 @@ pub(crate) fn touch_screen(ctx: &egui::Context) -> bool {
 }
 
 const KEYBOARD_ZONES: &str = "gridcraft.keyboard_zones";
+const TEXT_ZONES: &str = "gridcraft.text_zones";
+const FIELD_TAPPED: &str = "gridcraft.field_tapped";
 const CELL_ZONE: &str = "gridcraft.cell_zone";
 const CELL_TAPPED: &str = "gridcraft.cell_tapped";
 const TOUCH_SCREEN: &str = "gridcraft.touch_screen";

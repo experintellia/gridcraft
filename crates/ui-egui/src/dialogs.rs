@@ -1113,7 +1113,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                     } else {
                         ui.label("Picture file path (PNG or JPEG):");
                         let mut path = d.values.get("path").and_then(Json::as_str).unwrap_or("").to_string();
-                        if ui.text_edit_singleline(&mut path).changed() {
+                        if crate::text_zone(ui.text_edit_singleline(&mut path)).changed() {
                             d.values.remove("base64");
                             d.values.insert("path".into(), json!(path));
                         }
@@ -1134,7 +1134,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                     }
                     ui.label("Description (optional):");
                     let mut alt = d.values.get("alt").and_then(Json::as_str).unwrap_or("").to_string();
-                    if ui.text_edit_singleline(&mut alt).changed() {
+                    if crate::text_zone(ui.text_edit_singleline(&mut alt)).changed() {
                         d.values.insert("alt".into(), json!(alt));
                     }
                     if d.values.get("placement").and_then(Json::as_str) == Some("cell") {
@@ -1169,7 +1169,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                     let fmt = d.values.get("format").and_then(Json::as_str).unwrap_or("xlsx").to_string();
                     ui.label(format!("Save a copy as .{fmt}"));
                     let mut path = d.values.get("path").and_then(Json::as_str).unwrap_or("").to_string();
-                    ui.text_edit_singleline(&mut path);
+                    crate::text_zone(ui.text_edit_singleline(&mut path));
                     d.values.insert("path".into(), json!(path.clone()));
                     ok_cancel(ui, &mut confirm, &mut open);
                     if confirm {
@@ -1466,9 +1466,9 @@ fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
                             .unwrap_or_default();
                         let multiline = key == "text";
                         let r = if multiline {
-                            ui.add(egui::TextEdit::multiline(&mut s).desired_rows(4).desired_width(320.0))
+                            crate::text_zone(ui.add(egui::TextEdit::multiline(&mut s).desired_rows(4).desired_width(320.0)))
                         } else {
-                            ui.add(egui::TextEdit::singleline(&mut s).desired_width(320.0))
+                            crate::text_zone(ui.add(egui::TextEdit::singleline(&mut s).desired_width(320.0)))
                         };
                         if r.changed() {
                             d.values.insert(key.into(), json!(s));
@@ -1480,7 +1480,7 @@ fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
                     ui.vertical(|ui| {
                         ui.label(label);
                         let mut s = d.values.get(key).and_then(Json::as_str).unwrap_or_default().to_string();
-                        if ui.add(egui::TextEdit::singleline(&mut s).password(!d.show_password).desired_width(320.0)).changed() {
+                        if crate::text_zone(ui.add(egui::TextEdit::singleline(&mut s).password(!d.show_password).desired_width(320.0))).changed() {
                             d.values.insert(key.into(), json!(s));
                         }
                         ui.checkbox(&mut d.show_password, "Show password");
@@ -1625,7 +1625,7 @@ fn format_cells(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: 
                 cols[1].label(egui::RichText::new(preview).font(theme::ui_font(15.0)));
                 cols[1].add_space(8.0);
                 cols[1].label(lang.tr("Type (custom format code):"));
-                cols[1].text_edit_singleline(&mut code);
+                crate::text_zone(cols[1].text_edit_singleline(&mut code));
                 for c in [
                     "0",
                     "0.00",
@@ -1812,7 +1812,7 @@ fn format_cells(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: 
 fn insert_function(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool) {
     ui.horizontal(|ui| {
         ui.label("Search:");
-        let r = ui.add(egui::TextEdit::singleline(&mut d.search).desired_width(300.0).hint_text("e.g. lookup, average, date"));
+        let r = crate::text_zone(ui.add(egui::TextEdit::singleline(&mut d.search).desired_width(300.0).hint_text("e.g. lookup, average, date")));
         r.request_focus();
     });
     let locale = app.ui.language.formula_locale();
@@ -1876,12 +1876,12 @@ fn find(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog) {
     let mut with = d.values.get("with").and_then(Json::as_str).unwrap_or("").to_string();
     ui.horizontal(|ui| {
         ui.label("Find what:");
-        ui.add(egui::TextEdit::singleline(&mut what).desired_width(260.0));
+        crate::text_zone(ui.add(egui::TextEdit::singleline(&mut what).desired_width(260.0)));
     });
     if d.tab == "Replace" {
         ui.horizontal(|ui| {
             ui.label("Replace with:");
-            ui.add(egui::TextEdit::singleline(&mut with).desired_width(244.0));
+            crate::text_zone(ui.add(egui::TextEdit::singleline(&mut with).desired_width(244.0)));
         });
     }
     let mut case = d.values.get("matchCase").and_then(Json::as_bool).unwrap_or(false);
@@ -1964,7 +1964,7 @@ fn go_to(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bo
     let mut r = d.values.get("reference").and_then(Json::as_str).unwrap_or("").to_string();
     ui.horizontal(|ui| {
         ui.label("Reference:");
-        ui.text_edit_singleline(&mut r).request_focus();
+        crate::text_zone(ui.text_edit_singleline(&mut r)).request_focus();
     });
     d.values.insert("reference".into(), json!(r.clone()));
     if ui.button("Special…").clicked() {
@@ -1992,7 +1992,7 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
         ui.horizontal(|ui| {
             ui.label(if i == 0 { "Sort by" } else { "Then by" });
             let mut col = lv["column"].as_str().unwrap_or("A").to_string();
-            ui.add(egui::TextEdit::singleline(&mut col).desired_width(50.0));
+            crate::text_zone(ui.add(egui::TextEdit::singleline(&mut col).desired_width(50.0)));
             lv["column"] = json!(col.to_ascii_uppercase());
             let mut by = lv["by"].as_str().unwrap_or("values").to_string();
             egui::ComboBox::from_id_salt(("by", i))
@@ -2217,7 +2217,7 @@ fn select_data(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &
     let edit = |ui: &mut egui::Ui, d: &mut Dialog, key: &str, label: &str| {
         ui.label(label);
         let mut v = text(d, key);
-        if ui.add(egui::TextEdit::singleline(&mut v).desired_width(420.0)).changed() {
+        if crate::text_zone(ui.add(egui::TextEdit::singleline(&mut v).desired_width(420.0))).changed() {
             d.values.insert(key.into(), json!(v));
         }
     };
@@ -2304,7 +2304,8 @@ fn manage_rules(app: &mut SheetApp, ui: &mut egui::Ui) {
 
 fn command_search(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool) {
     let w = ui.available_width().min(480.0);
-    let r = ui.add(egui::TextEdit::singleline(&mut d.search).desired_width(w).hint_text("Type a command, e.g. freeze, chart, bold…"));
+    let r =
+        crate::text_zone(ui.add(egui::TextEdit::singleline(&mut d.search).desired_width(w).hint_text("Type a command, e.g. freeze, chart, bold…")));
     r.request_focus();
     let q = d.search.to_ascii_lowercase();
     let cmds: Vec<(String, String, String)> = app
@@ -2347,13 +2348,13 @@ fn goal_seek(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mu
     let (mut set, mut to, mut changing) = (get("set"), get("to"), get("changing"));
     egui::Grid::new("gs").show(ui, |ui| {
         ui.label("Set cell:");
-        ui.text_edit_singleline(&mut set);
+        crate::text_zone(ui.text_edit_singleline(&mut set));
         ui.end_row();
         ui.label("To value:");
-        ui.text_edit_singleline(&mut to);
+        crate::text_zone(ui.text_edit_singleline(&mut to));
         ui.end_row();
         ui.label("By changing cell:");
-        ui.text_edit_singleline(&mut changing);
+        crate::text_zone(ui.text_edit_singleline(&mut changing));
         ui.end_row();
     });
     d.values.insert("set".into(), json!(set.clone()));
@@ -2501,7 +2502,7 @@ fn analysis_toolpak(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confi
                 d.values.insert("outputTo".into(), json!(choice));
             }
             let mut t = d.values.get(key).and_then(Json::as_str).unwrap_or("").to_string();
-            if ui.add(egui::TextEdit::singleline(&mut t).desired_width(160.0)).changed() {
+            if crate::text_zone(ui.add(egui::TextEdit::singleline(&mut t).desired_width(160.0))).changed() {
                 d.values.insert(key.into(), json!(t));
                 d.values.insert("outputTo".into(), json!(choice));
             }
@@ -2516,7 +2517,7 @@ fn solver(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool
     let text = |d: &Dialog, k: &str| d.values.get(k).map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).unwrap_or_default();
     let edit = |ui: &mut egui::Ui, d: &mut Dialog, k: &str, width: f32| {
         let mut t = text(d, k);
-        if ui.add(egui::TextEdit::singleline(&mut t).desired_width(width)).changed() {
+        if crate::text_zone(ui.add(egui::TextEdit::singleline(&mut t).desired_width(width))).changed() {
             d.values.insert(k.into(), json!(t));
         }
     };
