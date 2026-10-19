@@ -520,6 +520,23 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Close", "閉じる"),
     ("Options", "オプション"),
     ("Blank workbook", "空白のブック"),
+    // webxdc: the start screen and Replace with File.
+    ("Start a workbook", "ブックを始める"),
+    ("Everyone in this chat works on the same workbook.", "このチャットの全員が同じブックで作業します。"),
+    ("New blank workbook", "新しい空白のブック"),
+    ("Start with empty sheets.", "空のシートから始めます。"),
+    ("Open a file", "ファイルを開く"),
+    ("Share a workbook from this device with the chat.", "このデバイスのブックをチャットで共有します。"),
+    ("Replace with File…", "ファイルで置き換え…"),
+    ("Replace Workbook", "ブックの置き換え"),
+    (
+        "The file replaces this workbook for everyone in the chat. Undo brings the workbook back.",
+        "このファイルで、チャットの全員のブックが置き換わります。元に戻すとブックが復元されます。",
+    ),
+    ("Everyone in the chat gets this workbook without its password.", "チャットの全員が、パスワードなしでこのブックを受け取ります。"),
+    ("Replace", "置き換え"),
+    ("Choose File…", "ファイルを選択…"),
+    ("Cancel", "キャンセル"),
     ("Recent", "最近使ったアイテム"),
     ("No recent workbooks yet.", "最近使ったブックはまだありません。"),
     ("More workbooks", "その他のブック"),
@@ -645,6 +662,11 @@ mod tests {
         assert_eq!(Language::Sr.tr("Page Layout|Orientation"), "Orijentacija");
         assert_eq!(Language::Sr.tr("Orientation"), "Orijentacija");
         assert_eq!(Language::parse("xx"), None);
+        // webxdc's start screen and Replace Workbook dialog.
+        assert_eq!(Language::De.tr("Start a workbook"), "Arbeitsmappe beginnen");
+        assert_eq!(Language::Fr.tr("Replace Workbook"), "Remplacer le classeur");
+        assert_eq!(Language::Ja.tr("Cancel"), "キャンセル");
+        assert_eq!(Language::De.tr(crate::dialogs::CHAT_COPY_NOTICE), "Alle im Chat erhalten diese Arbeitsmappe ohne Kennwort.");
     }
 
     #[test]

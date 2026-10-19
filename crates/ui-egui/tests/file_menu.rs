@@ -236,8 +236,19 @@ fn a_single_document_host_offers_no_other_workbooks() {
     }
     assert!(h.state().offers("file.save"));
     assert_eq!(h.state().session.documents().len(), 1);
-    h.state_mut().run_or_alert("file.new", serde_json::json!({}));
-    assert!(h.state().message.is_none(), "a shortcut for a left-out command only shows a toast");
+    // Ctrl+N, Ctrl+W and their key tips do nothing, not even a toast.
+    for id in ["file.new", "file.close", "view.newWindow"] {
+        h.state_mut().run_or_alert(id, serde_json::json!({}));
+        assert!(h.state().message.is_none() && h.state().toast.is_none(), "{id} does nothing");
+    }
+    // Ctrl+O is Replace with File: the warning first, no picker yet.
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::O);
+    h.run_steps(2);
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("replaceWorkbook"));
+    assert_eq!(*picks.lock().unwrap(), 0);
+    assert!(h.state().toast.is_none());
+    click(&mut h, "Cancel");
+    assert!(h.state().dialog.is_none());
     // File opens on Info, without New, Open, Close or the samples.
     h.get_by_label("File").click();
     h.run_steps(3);
