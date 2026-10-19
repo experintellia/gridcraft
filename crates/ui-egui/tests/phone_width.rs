@@ -88,7 +88,7 @@ fn formula_field(width: f32, percent: u32) -> egui::Rect {
 #[test]
 fn the_formula_field_keeps_its_width() {
     // 390 px at 100%, at 170% (229 points), and the narrowest a phone gets (a 390 px canvas at 200%: 195 points).
-    // Also each width where a control comes back (at 100%): 232 points (✕ ✓ only), 264 (fx), 360 (Name Box), 388 (both).
+    // Also each width where a control comes back (at 100%): 232 points (✕ ✓ only), 360 (Name Box), 388 (and fx).
     for (width, percent) in [(390.0, 100), (390.0, 170), (390.0, 200), (232.0, 100), (264.0, 100), (360.0, 100), (388.0, 100)] {
         let field = formula_field(width, percent);
         let points = width / (percent as f32 / 100.0);
@@ -96,6 +96,13 @@ fn the_formula_field_keeps_its_width() {
         let min = if points >= 232.0 { 120.0 } else { 80.0 };
         assert!(field.width() >= min && field.right() <= points, "{width} px at {percent}%: {field:?}");
     }
+}
+
+#[test]
+fn fx_goes_before_the_name_box() {
+    // At 300 points the Name Box is hidden, and fx with it: the field gets about 188 points (about 158 with fx).
+    let field = formula_field(300.0, 100);
+    assert!(field.width() >= 180.0, "{field:?}");
 }
 
 #[test]

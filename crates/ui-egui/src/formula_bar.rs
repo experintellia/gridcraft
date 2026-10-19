@@ -27,7 +27,8 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                 const FIELD_MIN: f32 = 120.0;
                 let room = ui.available_width() - REST - FIELD_MIN;
                 let show_name = room >= NAME;
-                let show_fx = room >= FX + if show_name { NAME } else { 0.0 };
+                // fx goes first (it is also on the Formulas tab), so it never shows without the Name Box.
+                let show_fx = show_name && room >= FX + NAME;
                 if show_name {
                     name_box(app, ui, &t);
                     ui.add_space(4.0);
