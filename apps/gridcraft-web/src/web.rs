@@ -98,7 +98,9 @@ fn keyboard_on_tap(ctx: egui::Context) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
     let touch_screen = web_sys::window().and_then(|w| w.match_media("(pointer: coarse)").ok().flatten()).is_some_and(|m| m.matches());
     if touch_screen {
-        ctx.on_end_pass("gridcraft.text_input", std::sync::Arc::new(|ui: &mut egui::Ui| place_text_input(ui.ctx())));
+        // Without `path()` clips (Android WebView before Chrome 88) the input would cover everything between the zones.
+        let clips = web_sys::css::supports_with_value("clip-path", "path('M0 0')").unwrap_or(false);
+        ctx.on_end_pass("gridcraft.text_input", std::sync::Arc::new(move |ui: &mut egui::Ui| place_text_input(ui.ctx(), clips)));
         unpan_after_keyboard();
     }
     // Where and when the touch began, and whether a second finger joined it.
@@ -106,14 +108,14 @@ fn keyboard_on_tap(ctx: egui::Context) {
     let start_set = start.clone();
     // Where the input over the text zones was tapped (in points), waiting for iOS to focus the input.
     let tapped = std::rc::Rc::new(std::cell::Cell::new(None));
-    let (tapped_start, tapped_end) = (tapped.clone(), tapped.clone());
+    let (tapped_start, tapped_end, tapped_down) = (tapped.clone(), tapped.clone(), tapped.clone());
     let on_start = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(move |e: web_sys::TouchEvent| {
         tapped_start.set(None);
         if let Some(t) = e.changed_touches().get(0) {
             start_set.set((t.client_x(), t.client_y(), e.time_stamp(), e.touches().length() > 1));
         }
     });
-    let focus_ctx = ctx.clone();
+    let (focus_ctx, down_ctx) = (ctx.clone(), ctx.clone());
     let on_end = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(move |e: web_sys::TouchEvent| {
         // One finger, lifted soon and near where it went down: a tap, not a scroll, a pinch or a long press.
         let Some(t) = e.changed_touches().get(0).filter(|_| e.touches().length() == 0) else { return };
@@ -122,9 +124,7 @@ fn keyboard_on_tap(ctx: egui::Context) {
             return;
         }
         let Some((canvas, input)) = canvas_and_input() else { return };
-        let r = canvas.get_bounding_client_rect();
-        let zoom = ctx.zoom_factor();
-        let p = egui::pos2((f64::from(t.client_x()) - r.left()) as f32 / zoom, (f64::from(t.client_y()) - r.top()) as f32 / zoom);
+        let p = canvas_point(&ctx, &canvas, t.client_x(), t.client_y());
         let target = e.target();
         if target.as_ref() == Some(input.as_ref()) {
             // iOS focuses the input after `touchend`, where its tap lands then: editing now would move the input
@@ -144,6 +144,16 @@ fn keyboard_on_tap(ctx: egui::Context) {
     // Capturing: eframe stops touches on the canvas from bubbling.
     let _ = document.add_event_listener_with_callback_and_bool("touchstart", on_start.as_ref().unchecked_ref(), true);
     let _ = document.add_event_listener_with_callback_and_bool("touchend", on_end.as_ref().unchecked_ref(), true);
+    // A mouse or trackpad on a touch screen (an iPad's, a tablet's) fires no touch events, and focuses the input on
+    // the press itself.
+    let on_down = Closure::<dyn FnMut(web_sys::PointerEvent)>::new(move |e: web_sys::PointerEvent| {
+        if e.pointer_type() == "touch" {
+            return;
+        }
+        let on_input = canvas_and_input().filter(|(_, input)| e.target().as_ref() == Some(input.as_ref()));
+        tapped_down.set(on_input.map(|(canvas, _)| canvas_point(&down_ctx, &canvas, e.client_x(), e.client_y())));
+    });
+    let _ = document.add_event_listener_with_callback_and_bool("pointerdown", on_down.as_ref().unchecked_ref(), true);
     let on_focus = Closure::<dyn FnMut(web_sys::FocusEvent)>::new(move |e: web_sys::FocusEvent| {
         let Some((canvas, input)) = canvas_and_input().filter(|(_, input)| e.target().as_ref() == Some(input.as_ref())) else { return };
         // Focused now: the input can shrink to the zone tapped (iOS keeps a focused input in view).
@@ -155,6 +165,7 @@ fn keyboard_on_tap(ctx: egui::Context) {
     // Listening for the page's lifetime.
     on_start.forget();
     on_end.forget();
+    on_down.forget();
     on_focus.forget();
 }
 
@@ -189,10 +200,23 @@ fn canvas_and_input() -> Option<(web_sys::HtmlCanvasElement, web_sys::HtmlInputE
     Some((canvas, input))
 }
 
-/// Lays eframe's text input over the active cell and the text fields while they take a tap.
-fn place_text_input(ctx: &egui::Context) {
+/// A page position (CSS px) on the canvas, in points.
+fn canvas_point(ctx: &egui::Context, canvas: &web_sys::HtmlCanvasElement, x: i32, y: i32) -> egui::Pos2 {
+    let r = canvas.get_bounding_client_rect();
+    let zoom = ctx.zoom_factor();
+    egui::pos2((f64::from(x) - r.left()) as f32 / zoom, (f64::from(y) - r.top()) as f32 / zoom)
+}
+
+/// Lays eframe's text input over the active cell and the text fields while they take a tap; over the active cell only
+/// where the browser can't clip it to them.
+fn place_text_input(ctx: &egui::Context, clips: bool) {
     let Some((canvas, input)) = canvas_and_input() else { return };
-    cover(ctx, &canvas, &input, &gridcraft_ui_egui::text_zones(ctx));
+    let mut zones = gridcraft_ui_egui::text_zones(ctx);
+    if !clips {
+        let cell = gridcraft_ui_egui::cell_zone(ctx);
+        zones.retain(|z| Some(*z) == cell);
+    }
+    cover(ctx, &canvas, &input, &zones);
 }
 
 /// Lays the input over `zones` (points), clipped to them so that a tap between them still reaches the canvas; with

@@ -230,6 +230,25 @@ fn no_text_input_over_a_field_a_dialog_covers() {
 }
 
 #[test]
+fn no_text_input_over_a_field_a_popup_covers_in_part() {
+    let mut h = harness();
+    let grid_top = h.state().grid.rect.unwrap().top();
+    let name_box = text_zones(&mut h).into_iter().find(|z| z.bottom() <= grid_top).expect("the name box takes a tap");
+    // A popup over the left of the box, clear of its centre and corners.
+    let strip = egui::Rect::from_min_size(name_box.left_center() + vec2(4.0, -2.0), vec2(12.0, 4.0));
+    h.ctx.on_end_pass(
+        "test.popup",
+        std::sync::Arc::new(move |ui: &mut egui::Ui| {
+            egui::Area::new(egui::Id::new("test.popup")).order(egui::Order::Foreground).fixed_pos(strip.min).show(ui.ctx(), |ui| {
+                ui.allocate_exact_size(strip.size(), egui::Sense::click());
+            });
+        }),
+    );
+    h.run_steps(2);
+    assert!(!text_zones(&mut h).iter().any(|z| z.bottom() <= grid_top), "a tap on the popup reaches it");
+}
+
+#[test]
 fn a_tap_on_the_text_input_over_the_active_cell_still_edits_it() {
     let mut h = harness();
     let c3 = center(&h, CellRef::new(2, 2));

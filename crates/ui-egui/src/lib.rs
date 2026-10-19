@@ -1432,17 +1432,26 @@ fn add_text_zone(ctx: &egui::Context, zone: TextZone) {
     ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<TextZone>>(egui::Id::new(TEXT_ZONES)).push(zone));
 }
 
-/// The text zones whose layer is on top at their corners and centre (no window, menu or popup over them).
+/// The text zones no window, menu or popup covers, even in part: their layer takes a tap at their centre (so no modal
+/// dialog is over them) and no interactable layer above it overlaps them.
 fn shown_text_zones(ctx: &egui::Context) -> Vec<(egui::Rect, egui::Id)> {
     let zones: Vec<TextZone> = ctx.data(|d| d.get_temp(egui::Id::new(TEXT_ZONES))).unwrap_or_default();
+    // Back to front. The root layer (the grid, the formula bar) is no area, so isn't listed: every higher order is above it.
+    let layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().filter(|l| m.areas().is_visible(l)).collect());
+    let covered = |r: egui::Rect, layer: egui::LayerId| {
+        let at = layers.iter().position(|l| *l == layer);
+        layers
+            .iter()
+            .enumerate()
+            .filter(|(i, l)| at.map_or(l.order > layer.order, |at| *i > at))
+            .filter_map(|(_, l)| egui::AreaState::load(ctx, l.id))
+            .any(|a| a.interactable && a.rect().intersects(r))
+    };
     zones
         .into_iter()
         .filter(|(rect, _, layer)| {
             let r = rect.shrink(1.0);
-            r.is_positive()
-                && [r.center(), r.left_top(), r.right_top(), r.left_bottom(), r.right_bottom()]
-                    .into_iter()
-                    .all(|p| ctx.layer_id_at(p) == Some(*layer))
+            r.is_positive() && ctx.layer_id_at(r.center()) == Some(*layer) && !covered(r, *layer)
         })
         .map(|(rect, id, _)| (rect, id))
         .collect()

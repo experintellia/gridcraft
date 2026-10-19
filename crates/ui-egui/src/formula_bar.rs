@@ -127,8 +127,11 @@ fn name_box(app: &mut SheetApp, ui: &mut egui::Ui, t: &Tokens) {
         crate::text_zone(child.add(TextEdit::singleline(&mut text).id(id).frame(egui::Frame::NONE).font(theme::ui_font(13.0)).desired_width(96.0)));
     if resp.gained_focus() {
         app.name_box = Some(shown.clone());
-        // Typing replaces the reference. A tap on a touch screen focuses the box without placing a cursor.
-        if let Some(mut state) = TextEdit::load_state(ui.ctx(), id) {
+        // Typing replaces the reference. A tap on a touch screen focuses the box without placing a cursor; a press of
+        // the pointer has placed it (and may drag a selection from there).
+        if !resp.is_pointer_button_down_on()
+            && let Some(mut state) = TextEdit::load_state(ui.ctx(), id)
+        {
             let all = egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(text.chars().count()));
             state.cursor.set_char_range(Some(all));
             state.store(ui.ctx(), id);
