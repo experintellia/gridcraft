@@ -346,6 +346,20 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Close" => "Fechar",
         "Options" => "Opções",
         "Blank workbook" => "Pasta de trabalho em branco",
+        // webxdc: the start screen and Replace with File.
+        "Start a workbook" => "Começar uma pasta de trabalho",
+        "Everyone in this chat works on the same workbook." => "Todos neste chat trabalham na mesma pasta de trabalho.",
+        "New blank workbook" => "Nova pasta de trabalho em branco",
+        "Start with empty sheets." => "Comece com planilhas vazias.",
+        "Open a file" => "Abrir um arquivo",
+        "Share a workbook from this device with the chat." => "Compartilhe com o chat uma pasta de trabalho deste dispositivo.",
+        "Replace with File…" => "Substituir por Arquivo…",
+        "Replace Workbook" => "Substituir Pasta de Trabalho",
+        "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
+            "O arquivo substitui esta pasta de trabalho para todos no chat. Desfazer traz a pasta de trabalho de volta."
+        }
+        "Everyone in the chat gets this workbook without its password." => "Todos no chat recebem esta pasta de trabalho sem a senha.",
+        "Choose File…" => "Escolher Arquivo…",
         "Recent" => "Recentes",
         "No recent workbooks yet." => "Ainda não há pastas de trabalho recentes.",
         "More workbooks" => "Mais pastas de trabalho",

@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-15 · **Change:** minor (webxdc build: no Save or Print; phone-width ribbon tabs and dialogs) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-16 · **Change:** minor (webxdc build: Ctrl+O replaces the workbook, password-protected files ask for the password, start screen translated) · **Target:** Microsoft Excel (Microsoft 365)
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.
@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-16 | webxdc build: Ctrl+O is Replace with File (after its warning) and Ctrl+N/Ctrl+W do nothing instead of showing a toast; a password-protected file asks for its password (saying the chat gets it without one) and only the decrypted workbook is shared, after the Replace Workbook warning if someone started a workbook meanwhile; the start screen and the Replace Workbook dialog are translated |
 | 2026-10-15 | webxdc build: File leaves out Save (Save As hands a copy to the chat) and Print (no print dialog in the messenger), and AutoSave is gone on the web. On a phone the ribbon's tab row swipes sideways and dialogs (the command palette included) fit the screen |
 | 2026-10-13 | webxdc build (`packaging/webxdc/package.sh`): everyone in a Delta Chat chat edits one shared workbook. Edits replicate as commands ordered by a Yjs array (`yrs`) and replay on every member; paste and Format Painter ship the workbook they leave; opening a file replaces the shared workbook; Save sends the file to the chat; members see each other's selections live (realtime channel); one workbook per chat: a start screen (blank workbook or a file) until someone starts it, no New/Open/samples/window commands after, and replacing it with a file asks first |
 | 2026-10-12 | Rows auto-fit oversized fonts: opening a file and whole-row/column formatting grow non-custom rows to their tallest font (#833) |
@@ -195,6 +196,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-16 | minor | Progress log: webxdc loose ends (#5 on the fork) |
 | 2026-10-13 | minor | Progress log: webxdc build with shared editing |
 | 2026-10-12 | minor | Rows auto-fit oversized fonts on open and whole-row/column formatting (#833); progress log row |
 | 2026-10-12 | minor | Progress log: multi-area row/column delete (#758) |

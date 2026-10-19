@@ -555,6 +555,14 @@ impl SheetApp {
         if id == "file.exportPdf" && self.services.pick_save.is_some() && params.get("path").and_then(Json::as_str).is_none_or(str::is_empty) {
             return self.export_pdf_with_picker(params);
         }
+        // One shared workbook (webxdc): Open (Ctrl+O, its key tip) is File › Replace with File,
+        // which warns first; New, Close and the window commands do nothing.
+        if !self.offers(id) {
+            if id == "file.open" {
+                self.open_dialog("open", json!({}));
+            }
+            return;
+        }
         if let Err(e) = self.run(id, params) {
             self.alert(e);
         }

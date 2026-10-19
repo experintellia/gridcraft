@@ -259,6 +259,21 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Close" => "Zavřít",
         "Options" => "Možnosti",
         "Blank workbook" => "Prázdný sešit",
+        // webxdc: the start screen and Replace with File.
+        "Start a workbook" => "Začít sešit",
+        "Everyone in this chat works on the same workbook." => "Všichni v tomto chatu pracují na stejném sešitu.",
+        "New blank workbook" => "Nový prázdný sešit",
+        "Start with empty sheets." => "Začít s prázdnými listy.",
+        "Open a file" => "Otevřít soubor",
+        "Share a workbook from this device with the chat." => "Sdílet do chatu sešit z tohoto zařízení.",
+        "Replace with File…" => "Nahradit souborem…",
+        "Replace Workbook" => "Nahradit sešit",
+        "The file replaces this workbook for everyone in the chat. Undo brings the workbook back." => {
+            "Soubor nahradí tento sešit všem v chatu. Akce Zpět sešit vrátí."
+        }
+        "Everyone in the chat gets this workbook without its password." => "Všichni v chatu dostanou tento sešit bez hesla.",
+        "Replace" => "Nahradit",
+        "Choose File…" => "Vybrat soubor…",
         "Recent" => "Naposledy použité",
         "No recent workbooks yet." => "Zatím žádné naposledy použité sešity.",
         "More workbooks" => "Další sešity",

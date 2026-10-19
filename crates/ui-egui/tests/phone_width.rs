@@ -74,3 +74,60 @@ fn the_command_palette_fits() {
     let r = h.ctx.memory(|m| m.area_rect(egui::Id::new("dialog").with("commandSearch"))).expect("palette");
     assert!(r.left() >= 0.0 && r.right() <= 390.0, "{r:?}");
 }
+
+/// The formula bar's text field (its keyboard zone) on a phone, at the given interface size.
+fn formula_field(width: f32, percent: u32) -> egui::Rect {
+    let mut h = phone();
+    h.state_mut().run("view.interfaceScale", serde_json::json!({ "percent": percent })).unwrap();
+    h.set_size(egui::vec2(width, 844.0));
+    h.run_steps(4);
+    let grid_top = h.state().grid.rect.unwrap().top();
+    gridcraft_ui_egui::keyboard_zones(&h.ctx).into_iter().find(|z| z.bottom() <= grid_top).expect("formula bar zone")
+}
+
+#[test]
+fn the_formula_field_keeps_its_width() {
+    // 390 px at 100%, at 170% (229 points), and the narrowest a phone gets (a 390 px canvas at 200%: 195 points).
+    // Also each width where a control comes back (at 100%): 232 points (✕ ✓ only), 360 (Name Box), 388 (and fx).
+    for (width, percent) in [(390.0, 100), (390.0, 170), (390.0, 200), (232.0, 100), (264.0, 100), (360.0, 100), (388.0, 100)] {
+        let field = formula_field(width, percent);
+        let points = width / (percent as f32 / 100.0);
+        // 120 points wherever the bar has them; narrower, only ✕ ✓ and the chevron are left beside the field.
+        let min = if points >= 232.0 { 120.0 } else { 80.0 };
+        assert!(field.width() >= min && field.right() <= points, "{width} px at {percent}%: {field:?}");
+    }
+}
+
+#[test]
+fn fx_goes_before_the_name_box() {
+    // At 300 points the Name Box is hidden, and fx with it: the field gets about 188 points (about 158 with fx).
+    let field = formula_field(300.0, 100);
+    assert!(field.width() >= 180.0, "{field:?}");
+}
+
+#[test]
+fn a_hidden_name_box_forgets_what_was_typed() {
+    let mut h = phone();
+    h.set_size(egui::vec2(900.0, 844.0));
+    h.run_steps(2);
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("gridcraft.name_box")));
+    h.run_steps(2);
+    h.input_mut().events.push(Event::Text("Q9".into()));
+    h.run_steps(2);
+    assert!(h.state().name_box.is_some());
+    // Narrowed (a phone turned upright) until the Name Box goes.
+    h.set_size(egui::vec2(300.0, 844.0));
+    h.run_steps(2);
+    assert!(h.state().name_box.is_none(), "{:?}", h.state().name_box);
+}
+
+#[test]
+fn a_formula_bar_with_no_room_does_not_panic() {
+    let mut h = phone();
+    h.state_mut().run("view.interfaceScale", serde_json::json!({ "percent": 200 })).unwrap();
+    h.set_size(egui::vec2(120.0, 844.0));
+    h.run_steps(2);
+    h.state_mut().begin_edit(None, true);
+    h.run_steps(2);
+    assert!(h.state().editor.is_some());
+}
