@@ -88,11 +88,30 @@ fn formula_field(width: f32, percent: u32) -> egui::Rect {
 #[test]
 fn the_formula_field_keeps_its_width() {
     // 390 px at 100%, at 170% (229 points), and the narrowest a phone gets (a 390 px canvas at 200%: 195 points).
-    for (width, percent) in [(390.0, 100), (390.0, 170), (390.0, 200)] {
+    // Also each width where a control comes back (at 100%): 232 points (✕ ✓ only), 264 (fx), 360 (Name Box), 388 (both).
+    for (width, percent) in [(390.0, 100), (390.0, 170), (390.0, 200), (232.0, 100), (264.0, 100), (360.0, 100), (388.0, 100)] {
         let field = formula_field(width, percent);
         let points = width / (percent as f32 / 100.0);
-        assert!(field.width() >= 80.0 && field.right() <= points, "{width} px at {percent}%: {field:?}");
+        // 120 points wherever the bar has them; narrower, only ✕ ✓ and the chevron are left beside the field.
+        let min = if points >= 232.0 { 120.0 } else { 80.0 };
+        assert!(field.width() >= min && field.right() <= points, "{width} px at {percent}%: {field:?}");
     }
+}
+
+#[test]
+fn a_hidden_name_box_forgets_what_was_typed() {
+    let mut h = phone();
+    h.set_size(egui::vec2(900.0, 844.0));
+    h.run_steps(2);
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("gridcraft.name_box")));
+    h.run_steps(2);
+    h.input_mut().events.push(Event::Text("Q9".into()));
+    h.run_steps(2);
+    assert!(h.state().name_box.is_some());
+    // Narrowed (a phone turned upright) until the Name Box goes.
+    h.set_size(egui::vec2(300.0, 844.0));
+    h.run_steps(2);
+    assert!(h.state().name_box.is_none(), "{:?}", h.state().name_box);
 }
 
 #[test]

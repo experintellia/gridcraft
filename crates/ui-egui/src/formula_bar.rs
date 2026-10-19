@@ -31,6 +31,10 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                 if show_name {
                     name_box(app, ui, &t);
                     ui.add_space(4.0);
+                } else {
+                    // A hidden Name Box can't lose focus, so drop what was typed into it: it would keep the Alt
+                    // key tips off and show stale text when the box comes back.
+                    app.name_box = None;
                 }
                 let editing = app.editor.is_some();
                 let c = if editing { t.text } else { t.text_disabled };
