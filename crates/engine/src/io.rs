@@ -66,14 +66,22 @@ pub fn open_bytes_with_password(name: &str, bytes: &[u8], password: Option<&str>
         gridcraft_xlsx::check_encryption(bytes).map_err(decrypt_error)?;
         return Err(EngineError::Other(format!("'{name}' {PASSWORD_REQUIRED}")));
     };
-    let plain = gridcraft_xlsx::decrypt(bytes, password).map_err(decrypt_error)?;
-    if gridcraft_xlsx::sniff(&plain) == gridcraft_xlsx::Format::Encrypted {
-        return Err(EngineError::Other(format!("We can't open '{name}': the encrypted file is damaged (it holds another encrypted file).")));
-    }
+    let plain = decrypt(name, bytes, password)?;
     let (mut wb, mut warnings) = open_plain(name, &plain)?;
     fit_imported_rows(&mut wb);
     warnings.insert(0, DECRYPTED_NOTICE.into());
     Ok((wb, warnings))
+}
+
+/// A password-protected workbook's plain file, for a host that opens files itself (webxdc: the
+/// password stays on the device; only the decrypted workbook is shared). Errors never quote the
+/// password.
+pub fn decrypt(name: &str, bytes: &[u8], password: &str) -> Result<Vec<u8>> {
+    let plain = gridcraft_xlsx::decrypt(bytes, password).map_err(|e| EngineError::Other(decrypt_message(name, e)))?;
+    if gridcraft_xlsx::sniff(&plain) == gridcraft_xlsx::Format::Encrypted {
+        return Err(EngineError::Other(format!("We can't open '{name}': the encrypted file is damaged (it holds another encrypted file).")));
+    }
+    Ok(plain)
 }
 
 /// Excel auto-fits rows to their tallest font when opening a file: rows without a user-set

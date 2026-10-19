@@ -256,13 +256,12 @@ impl Dialog {
                 // rather than asking for the password again.
                 let mut values = params.clone();
                 values["password"] = json!("");
-                Dialog::form(
-                    "openPassword",
-                    "Password",
-                    "file.open",
-                    vec![Note(format!("'{file}' is protected.")), Password { key: "password", label: "Password:" }],
-                    values,
-                )
+                let mut fields = vec![Note(format!("'{file}' is protected.")), Password { key: "password", label: "Password:" }];
+                // The chat gets the decrypted file: say so before OK shares it.
+                if app.services.single_document {
+                    fields.push(Note(app.ui.language.tr(CHAT_COPY_NOTICE).to_string()));
+                }
+                Dialog::form("openPassword", "Password", "file.open", fields, values)
             }
             "unprotectSheet" => Dialog::form(
                 "unprotectSheet",
@@ -1284,6 +1283,21 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         app.message = Some((d.title.clone(), "Return to the original worksheet to insert this picture, or cancel and choose another cell.".into()));
         confirm = false;
     }
+    // One shared workbook (webxdc): the host opens files itself. Hand it the decrypted file; the
+    // password never leaves this dialog.
+    if confirm && d.name == "openPassword" && app.services.single_document {
+        confirm = false;
+        match decrypt_for_host(app, &d) {
+            Ok(()) => {
+                open = false;
+                ctx.request_repaint();
+            }
+            Err(e) => {
+                d.values.insert("password".into(), json!(""));
+                app.message = Some((d.title.clone(), crate::clean_error(&e)));
+            }
+        }
+    }
     if confirm && let Some(cmd) = d.command {
         let params = build_params(&d);
         match app.run(cmd, params) {
@@ -1326,6 +1340,28 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
     } else if let Some(back) = d.back.take() {
         app.dialog = Some(*back);
     }
+}
+
+/// The Password dialog's line in a single-document host (webxdc), whose chat gets the file.
+pub const CHAT_COPY_NOTICE: &str = "Everyone in the chat gets this workbook without its password.";
+
+/// The Password dialog of a single-document host: decrypts its file with the typed password and
+/// puts the plain file in the host's inbox, which opens it like any other.
+///
+/// A file picked on the start screen (`blank`, no workbook yet) asks first, through Replace
+/// Workbook, if another member started one while the password was being typed.
+fn decrypt_for_host(app: &mut SheetApp, d: &Dialog) -> Result<(), String> {
+    let field = |key: &str| d.values.get(key).and_then(Json::as_str).unwrap_or_default();
+    let bytes = gridcraft_engine::io::base64_decode(field("base64")).ok_or("The file couldn't be read.")?;
+    let plain = gridcraft_engine::io::decrypt(field("name"), &bytes, field("password")).map_err(|e| e.to_string())?;
+    if d.values.get("blank") == Some(&json!(true)) && app.start == crate::Start::Off {
+        let params = json!({"name": field("name"), "base64": gridcraft_engine::io::base64_encode(&plain)});
+        app.open_dialog("replaceWorkbook", params);
+        return Ok(());
+    }
+    let inbox = app.services.inbox.as_ref().ok_or("This app can't open files.")?;
+    inbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((field("name").to_string(), plain));
+    Ok(())
 }
 
 /// Paste Special's legacy mnemonics select options; Enter still performs the paste.

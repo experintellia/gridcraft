@@ -237,3 +237,25 @@ fn a_tap_on_the_text_input_over_the_active_cell_still_edits_it() {
     h.step();
     assert_eq!(h.state().editor.as_ref().map(|e| e.cell), Some(CellRef::new(2, 2)));
 }
+
+#[test]
+fn the_text_input_covers_most_of_the_active_cell() {
+    let h = harness();
+    let app = h.state();
+    let sheet = app.session.active().unwrap().wb.active().unwrap();
+    let cell = Geo::new(sheet, app.grid.rect.unwrap(), app.view().scroll).screen_cell_rect(sheet, CellRef::new(2, 2));
+    let zone = gridcraft_ui_egui::cell_zone(&h.ctx).expect("a zone over C3");
+    // A tap near the top or bottom of the cell must still land on the input, or iOS keeps the keyboard down.
+    assert!(zone.height() >= cell.height() - 4.0, "{zone:?} in {cell:?}");
+    // The fill handle at the bottom-right corner stays on the grid.
+    assert!(!zone.intersects(egui::Rect::from_center_size(cell.right_bottom(), egui::vec2(9.0, 9.0))));
+}
+
+#[test]
+fn a_filter_header_keeps_its_tap() {
+    let mut h = harness();
+    h.state_mut().session.execute("data.filter", json!({"range": "C3:D6"})).unwrap();
+    h.state_mut().session.execute("selection.set", json!({"cell": "C3"})).unwrap();
+    h.run_steps(2);
+    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_none(), "a tap on C3's filter button opens the filter menu");
+}

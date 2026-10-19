@@ -18,8 +18,25 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                name_box(app, ui, &t);
-                ui.add_space(4.0);
+                // On a phone the text field keeps its room, as in mobile spreadsheets: Insert Function goes first
+                // (it's on the Formulas tab too), then the Name Box (the headings show the active cell) (#15).
+                // Widths with their spacing: the Name Box, fx, and the rest (✕ ✓, the gaps, the chevron).
+                const NAME: f32 = 126.0;
+                const FX: f32 = 30.0;
+                const REST: f32 = 80.0;
+                const FIELD_MIN: f32 = 120.0;
+                let room = ui.available_width() - REST - FIELD_MIN;
+                let show_name = room >= NAME;
+                // fx goes first (it is also on the Formulas tab), so it never shows without the Name Box.
+                let show_fx = show_name && room >= FX + NAME;
+                if show_name {
+                    name_box(app, ui, &t);
+                    ui.add_space(4.0);
+                } else {
+                    // A hidden Name Box can't lose focus, so drop what was typed into it: it would keep the Alt
+                    // key tips off and show stale text when the box comes back.
+                    app.name_box = None;
+                }
                 let editing = app.editor.is_some();
                 let c = if editing { t.text } else { t.text_disabled };
                 if crate::widgets::icon_button(ui, Icon::Close, c, "Cancel", vec2(22.0, 22.0)).clicked() && editing {
@@ -28,12 +45,12 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                 if crate::widgets::icon_button(ui, Icon::Check, c, "Enter", vec2(22.0, 22.0)).clicked() && editing {
                     app.commit_edit(0, 0, false, false);
                 }
-                if crate::widgets::icon_button(ui, Icon::Fx, t.text, "Insert Function", vec2(26.0, 22.0)).clicked() {
+                if show_fx && crate::widgets::icon_button(ui, Icon::Fx, t.text, "Insert Function", vec2(26.0, 22.0)).clicked() {
                     app.open_dialog("insertFunction", json!({}));
                 }
                 ui.add_space(4.0);
                 // The formula field.
-                let avail = ui.available_width() - 24.0;
+                let avail = (ui.available_width() - 24.0).max(0.0);
                 let field = Rect::from_min_size(ui.cursor().min, vec2(avail, h - 6.0));
                 ui.painter().rect_filled(field, 4.0, t.input_bg);
                 ui.painter().rect_stroke(field, 4.0, Stroke::new(1.0, t.input_border), StrokeKind::Inside);
@@ -41,7 +58,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                 let id = egui::Id::new("gridcraft.formula_bar");
                 let editing_here = app.editor.as_ref().is_some_and(|e| e.from_formula_bar);
                 if app.editor.is_some() {
-                    editor_widget(app, &mut child, id, theme::ui_font(13.0), expanded, field.width() - 12.0);
+                    editor_widget(app, &mut child, id, theme::ui_font(13.0), expanded, (field.width() - 12.0).max(0.0));
                 } else {
                     // Show the active cell's content; clicking starts editing in the bar.
                     let text = active_input(app);
