@@ -34,8 +34,9 @@ pub fn start() {
                 options,
                 Box::new(move |cc| {
                     crate::perf::mark("WebGL2 context ready");
-                    keyboard_on_tap(cc.egui_ctx.clone());
+                    // First: a drag or long press it claims (its `touchend` prevented) is no tap for the other.
                     let gestures = forward_cell_gestures(cc.egui_ctx.clone());
+                    keyboard_on_tap(cc.egui_ctx.clone());
                     let inbox: Inbox = Inbox::default();
                     let mut session = Session::new();
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone());
@@ -119,8 +120,9 @@ fn keyboard_on_tap(ctx: egui::Context) {
     });
     let focus_ctx = ctx.clone();
     let on_end = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(move |e: web_sys::TouchEvent| {
-        // One finger, lifted soon and near where it went down: a tap, not a scroll, a pinch or a long press.
-        let Some(t) = e.changed_touches().get(0).filter(|_| e.touches().length() == 0) else { return };
+        // One finger, lifted soon and near where it went down: a tap, not a scroll, a pinch or a long press (also
+        // Android's, sooner, which [`forward_cell_gestures`] took).
+        let Some(t) = e.changed_touches().get(0).filter(|_| e.touches().length() == 0 && !e.default_prevented()) else { return };
         let (x, y, at, multi) = start.get();
         if multi || e.time_stamp() - at > 500.0 || (t.client_x() - x).abs() > 10 || (t.client_y() - y).abs() > 10 {
             return;
