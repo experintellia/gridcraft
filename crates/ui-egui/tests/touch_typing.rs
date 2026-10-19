@@ -18,6 +18,7 @@ fn harness() -> egui_kittest::Harness<'static, SheetApp> {
         },
         SheetApp::new(session, Default::default()),
     );
+    gridcraft_ui_egui::set_touch_screen(&h.ctx, true);
     h.run_steps(4);
     h
 }
@@ -150,6 +151,66 @@ fn a_tap_reported_while_editing_does_not_edit_again_afterwards() {
     assert!(h.state().editor.is_none());
 }
 
+fn type_and_enter(h: &mut egui_kittest::Harness<'_, SheetApp>, text: &str) {
+    h.input_mut().events.push(Event::Text(text.into()));
+    h.step();
+    h.key_press(egui::Key::Enter);
+    h.step();
+}
+
+fn input(h: &egui_kittest::Harness<'_, SheetApp>, cell: &str) -> String {
+    let sheet = h.state().session.active().unwrap().wb.active().unwrap();
+    sheet.cell(CellRef::parse(cell).unwrap()).map(|c| c.input_text()).unwrap_or_default()
+}
+
+#[test]
+fn enter_after_a_tap_started_edit_keeps_the_keyboard_up_for_the_next_cell() {
+    let mut h = harness();
+    let c3 = center(&h, CellRef::new(2, 2));
+    tap(&mut h, c3, true);
+    h.step();
+    type_and_enter(&mut h, "5");
+    assert!(h.state().editor.is_none());
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "C4");
+    for _ in 0..3 {
+        h.step();
+        assert!(ime(&h), "the keyboard stays up after Enter");
+    }
+    let c4 = center(&h, CellRef::new(3, 2));
+    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_some_and(|z| z.contains(c4)), "the web shell's text input lies over C4");
+
+    // The next keystroke edits C4, and Enter goes on to C5.
+    type_and_enter(&mut h, "7");
+    h.step();
+    assert!(ime(&h));
+    assert_eq!((input(&h, "C3"), input(&h, "C4")), ("5".to_string(), "7".to_string()));
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "C5");
+}
+
+#[test]
+fn a_tap_elsewhere_lets_the_kept_keyboard_go() {
+    let mut h = harness();
+    gridcraft_ui_egui::tap_cell_zone(&h.ctx);
+    h.step();
+    type_and_enter(&mut h, "5");
+    h.step();
+    assert!(ime(&h));
+    let p = center(&h, CellRef::new(4, 3));
+    tap(&mut h, p, true);
+    h.step();
+    assert!(h.state().editor.is_none());
+    assert!(!ime(&h), "the keyboard goes down");
+}
+
+#[test]
+fn enter_without_touch_lets_the_ime_go() {
+    let mut h = harness();
+    type_and_enter(&mut h, "5");
+    h.step();
+    assert_eq!(input(&h, "C3"), "5");
+    assert!(!ime(&h), "no touch: no IME once the edit ends");
+}
+
 #[test]
 fn a_drag_from_the_text_input_over_the_active_cell_selects() {
     let mut h = harness();
@@ -202,4 +263,73 @@ fn a_filter_header_keeps_its_tap() {
     h.state_mut().session.execute("selection.set", json!({"cell": "C3"})).unwrap();
     h.run_steps(2);
     assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_none(), "a tap on C3's filter button opens the filter menu");
+}
+
+/// A frame with the events the app queued for itself (what eframe's `raw_input_hook` hands it).
+fn step_with_queued_events(h: &mut egui_kittest::Harness<'_, SheetApp>) {
+    let mut raw = std::mem::take(h.input_mut());
+    h.state_mut().raw_input_hook(&mut raw);
+    *h.input_mut() = raw;
+    h.step();
+}
+
+#[test]
+fn enter_after_a_formula_keeps_the_keyboard_up() {
+    let mut h = harness();
+    let c3 = center(&h, CellRef::new(2, 2));
+    tap(&mut h, c3, true);
+    h.step();
+    // The argument hint shows under the editor, over C4, until Enter closes it.
+    type_and_enter(&mut h, "=SUM(A1:A3");
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "C4");
+    for _ in 0..3 {
+        h.step();
+        assert!(ime(&h), "the keyboard stays up after Enter on a formula");
+    }
+    type_and_enter(&mut h, "7");
+    assert_eq!(input(&h, "C4"), "7");
+}
+
+#[test]
+fn a_composing_keyboard_types_into_the_next_cell() {
+    let mut h = harness();
+    gridcraft_ui_egui::tap_cell_zone(&h.ctx);
+    h.step();
+    type_and_enter(&mut h, "5");
+    h.step();
+    assert!(ime(&h));
+    // Gboard with suggestions, or a CJK keyboard: the word is composed first, then committed.
+    h.input_mut().events.push(Event::Ime(egui::ImeEvent::Preedit { text: "ap".into(), active_range_chars: None }));
+    h.step();
+    assert_eq!(h.state().editor.as_ref().map(|e| e.cell), Some(CellRef::new(3, 2)));
+    step_with_queued_events(&mut h);
+    assert_eq!(h.state().editor.as_ref().map(|e| e.text.as_str()), Some("ap"), "the editor composes the word");
+    assert!(ime(&h));
+    h.input_mut().events.push(Event::Ime(egui::ImeEvent::Preedit { text: "apple".into(), active_range_chars: None }));
+    h.step();
+    h.input_mut().events.push(Event::Ime(egui::ImeEvent::Commit("apple".into())));
+    h.step();
+    h.key_press(egui::Key::Enter);
+    h.step();
+    assert_eq!(input(&h, "C4"), "apple");
+    // A word committed at once (iOS Korean, a picked suggestion) edits the next cell too.
+    h.step();
+    h.input_mut().events.push(Event::Ime(egui::ImeEvent::Commit("pear".into())));
+    h.step();
+    h.key_press(egui::Key::Enter);
+    h.step();
+    assert_eq!(input(&h, "C5"), "pear");
+}
+
+#[test]
+fn a_desktop_touchscreen_lets_the_ime_go_after_enter() {
+    let mut h = harness();
+    gridcraft_ui_egui::set_touch_screen(&h.ctx, false);
+    let c3 = center(&h, CellRef::new(2, 2));
+    tap(&mut h, c3, true);
+    h.step();
+    type_and_enter(&mut h, "5");
+    h.step();
+    assert_eq!(input(&h, "C3"), "5");
+    assert!(!ime(&h), "no platform IME without a text field on the desktop");
 }
