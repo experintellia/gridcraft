@@ -1011,6 +1011,8 @@ impl SheetApp {
                 if dr != 0 || dc != 0 {
                     self.move_after_enter(dr, dc);
                 }
+                // Typing by touch goes on in the next cell after Enter or Tab; any other commit ends it.
+                self.grid.touch_typing &= dr != 0 || dc != 0;
                 self.after_engine();
                 true
             }
@@ -1025,6 +1027,7 @@ impl SheetApp {
 
     pub fn cancel_edit(&mut self) {
         self.editor = None;
+        self.grid.touch_typing = false;
         self.session.mode = gridcraft_engine::Mode::Ready;
     }
 
@@ -1385,9 +1388,20 @@ pub(crate) fn cell_keyboard_zone(ctx: &egui::Context, rect: Option<egui::Rect>) 
     })
 }
 
+/// The web shell runs on a touch screen: after Enter or Tab the on-screen keyboard stays up for the next cell. Off
+/// elsewhere (a desktop with a touchscreen), where the platform IME must not stay allowed without a text field.
+pub fn set_touch_screen(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(TOUCH_SCREEN), on));
+}
+
+pub(crate) fn touch_screen(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp(egui::Id::new(TOUCH_SCREEN))).unwrap_or(false)
+}
+
 const KEYBOARD_ZONES: &str = "gridcraft.keyboard_zones";
 const CELL_ZONE: &str = "gridcraft.cell_zone";
 const CELL_TAPPED: &str = "gridcraft.cell_tapped";
+const TOUCH_SCREEN: &str = "gridcraft.touch_screen";
 
 pub(crate) fn add_keyboard_zone(ctx: &egui::Context, rect: egui::Rect) {
     ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<egui::Rect>>(egui::Id::new(KEYBOARD_ZONES)).push(rect));

@@ -98,6 +98,7 @@ fn keyboard_on_tap(ctx: egui::Context) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
     let touch_screen = web_sys::window().and_then(|w| w.match_media("(pointer: coarse)").ok().flatten()).is_some_and(|m| m.matches());
     if touch_screen {
+        gridcraft_ui_egui::set_touch_screen(&ctx, true);
         ctx.on_end_pass("gridcraft.cell_input", std::sync::Arc::new(|ui: &mut egui::Ui| place_cell_input(ui.ctx())));
         unpan_after_keyboard();
     }
@@ -124,6 +125,11 @@ fn keyboard_on_tap(ctx: egui::Context) {
         let Some((canvas, input)) = canvas_and_input() else { return };
         let target = e.target();
         if target.as_ref() == Some(input.as_ref()) {
+            // Still focused, with the keyboard kept up after Enter: no focus event follows, so edit now.
+            if web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()).as_ref() == Some(input.as_ref()) {
+                gridcraft_ui_egui::tap_cell_zone(&ctx);
+                return;
+            }
             // iOS focuses the input after `touchend`, where its tap lands then: editing now would shrink the input
             // away from under that tap first, and the keyboard would stay down.
             tapped_end.set(true);
