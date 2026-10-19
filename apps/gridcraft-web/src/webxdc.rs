@@ -12,8 +12,9 @@
 //!
 //! Every `SHARE_EVERY` ops (see [`crate::collab`]) the member who crossed the line also sends a
 //! full copy of the workbook, `{snap: <base64 JSON>}`, when it fits in the messenger's
-//! `sendUpdateMaxSize`; on start, the app waits for all stored updates and replays only the ops
-//! after the latest copy that matches them. Older builds ignore payloads without `y`.
+//! `sendUpdateMaxSize`; on start, the app waits for all stored updates (holding only the latest
+//! copies, and going on after `STORED_WAIT_MS` if the messenger never says it's done) and replays
+//! only the ops after the latest copy that matches them. Older builds ignore payloads without `y`.
 //!
 //! The realtime channel also carries each member's sheet and selection (presence), drawn on the
 //! others' grids; it isn't stored, so it needs a messenger with realtime channels.
@@ -30,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast as _, JsValue};
 
-use crate::collab::Collab;
+use crate::collab::{Collab, SHARED_KEPT};
 
 /// The realtime channel's limit per message; larger updates go by `sendUpdate` alone.
 const REALTIME_MAX: usize = 128_000;
@@ -48,6 +49,12 @@ const GONE_MS: f64 = 15_000.0;
 const MAX_PEERS: usize = 50;
 const MAX_NAME: usize = 40;
 const MAX_RANGES: usize = 64;
+/// How long to wait for the messenger to say it has handed over the stored updates before going
+/// on without it.
+const STORED_WAIT_MS: i32 = 5_000;
+/// Copies held until the stored updates are all in (the latest ones to arrive: a long chat stores
+/// many, each a whole workbook).
+const COPIES_HELD: usize = 2 * SHARED_KEPT;
 
 /// Where a member is: the shared workbook's sheet and their selection.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -67,7 +74,7 @@ pub struct Webxdc {
     me: String,
     /// Received since the last frame (held until the stored ones are all in).
     received: Rc<RefCell<Vec<Vec<u8>>>>,
-    /// Copies of the workbook received, likewise.
+    /// Copies of the workbook received, likewise: the last [`COPIES_HELD`] to arrive.
     copies: Rc<RefCell<Vec<Vec<u8>>>>,
     /// `sendUpdateMaxSize`: the most a whole `sendUpdate` object may take, serialized.
     update_max: usize,
@@ -147,14 +154,24 @@ impl Webxdc {
         let on_update = Closure::<dyn FnMut(JsValue)>::new(move |update: JsValue| {
             let payload = Reflect::get(&update, &"payload".into()).unwrap_or_default();
             let field = |key: &str| Reflect::get(&payload, &key.into()).ok().and_then(|v| v.as_string()).as_deref().and_then(base64_decode);
-            let (bytes, to) = match (field("y"), field("snap")) {
-                (Some(y), _) => (y, &received),
-                (None, Some(copy)) => (copy, &copies),
+            let (bytes, is_copy) = match (field("y"), field("snap")) {
+                (Some(y), _) => (y, false),
+                (None, Some(copy)) => (copy, true),
                 (None, None) => return,
             };
             let (n, size) = count.get();
             count.set((n + 1, size + bytes.len()));
-            to.borrow_mut().push(bytes);
+            if is_copy {
+                // A long chat stores many copies, each a whole workbook: hold only the latest
+                // (they arrive in about the order they were made).
+                let mut copies = copies.borrow_mut();
+                copies.push(bytes);
+                if copies.len() > COPIES_HELD {
+                    copies.remove(0);
+                }
+            } else {
+                received.borrow_mut().push(bytes);
+            }
             repaint.request_repaint();
         });
         match call(&self.api, "setUpdateListener", &[on_update.as_ref().clone(), 0.into()]) {
@@ -165,13 +182,30 @@ impl Webxdc {
                 // has handed them over already.
                 let (replayed, repaint) = (self.replayed.clone(), ctx.clone());
                 match done.dyn_into::<js_sys::Promise>() {
-                    Ok(done) => wasm_bindgen_futures::spawn_local(async move {
-                        let _ = wasm_bindgen_futures::JsFuture::from(done).await;
-                        let (n, size) = stored.get();
-                        crate::perf::mark(format!("messenger handed over {n} stored updates ({} KB)", size / 1000));
-                        replayed.set(true);
-                        repaint.request_repaint();
-                    }),
+                    Ok(done) => {
+                        wasm_bindgen_futures::spawn_local(async move {
+                            let _ = wasm_bindgen_futures::JsFuture::from(done).await;
+                            let (n, size) = stored.get();
+                            crate::perf::mark(format!("messenger handed over {n} stored updates ({} KB)", size / 1000));
+                            replayed.set(true);
+                            repaint.request_repaint();
+                        });
+                        // A messenger that never settles the promise mustn't keep the app loading:
+                        // what arrives later applies as it comes.
+                        let (replayed, repaint) = (self.replayed.clone(), ctx.clone());
+                        let give_up = Closure::once_into_js(move || {
+                            if !replayed.get() {
+                                log::warn!("the messenger didn't say it handed over the stored updates; going on");
+                                replayed.set(true);
+                                repaint.request_repaint();
+                            }
+                        });
+                        if let Some(window) = web_sys::window()
+                            && let Err(e) = window.set_timeout_with_callback_and_timeout_and_arguments_0(give_up.unchecked_ref(), STORED_WAIT_MS)
+                        {
+                            log::warn!("couldn't set a timer: {e:?}");
+                        }
+                    }
                     Err(_) => replayed.set(true),
                 }
             }
@@ -257,7 +291,7 @@ impl Webxdc {
             self.send(&app.session, &update);
         }
         // `{"payload":{"snap":"<base64>"}}`: base64 takes 4 bytes for every 3.
-        if let Some(copy) = self.collab.share(&app.session, self.update_max.saturating_sub(64) / 4 * 3) {
+        if let Some(copy) = self.collab.share(self.update_max.saturating_sub(64) / 4 * 3) {
             let payload = object(&[("snap", base64_encode(&copy).into())]);
             if let Err(e) = call(&self.api, "sendUpdate", &[object(&[("payload", payload)]), "".into()]) {
                 log::warn!("couldn't share a copy of the workbook: {e:?}");

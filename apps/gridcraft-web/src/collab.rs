@@ -28,8 +28,11 @@
 //!
 //! The messenger hands every stored update over on each start, so opening a long-lived chat would
 //! replay its whole log. Instead, whenever a member's own edits take the log past a multiple of
-//! `SHARE_EVERY` ops, that member also posts a full copy of the workbook ([`Collab::share`]): the
-//! number of ops `n` it is the result of and a fingerprint of those ops in order. A member whose
+//! `SHARE_EVERY` ops, and the ops since the last copy take at least as many bytes as it did, that
+//! member also posts a full copy of the workbook ([`Collab::share`]): the number of ops `n` it is
+//! the result of and a fingerprint of those ops in order. The copy is the workbook as those ops
+//! leave it: a member whose workbook has changes that were never shared (`view.split`, the view
+//! modes) under ops run since posts none (`Collab::last`). A member whose
 //! log starts with ops of that fingerprint loads the copy and replays only the ops after it
 //! ([`Collab::offer`]); any other member (a collaborator's concurrent op ordered before the
 //! copy's last one, a damaged or unreadable copy) ignores it and replays as before. So a copy
@@ -37,11 +40,16 @@
 //! two members posting the same copy at once post the same `(n, fingerprint)`, which counts once.
 //! Copies travel as their own `sendUpdate` payload key (`snap`), which apps without this ignore;
 //! chats without copies replay the whole log, as before.
+//!
+//! A copy isn't checked against the ops it stands for (that would mean replaying them): a member
+//! can post a doctored one with a right `(n, fingerprint)`. Every member then loads it the next
+//! time they open the app, while members who stayed open keep the honest workbook, and nothing in
+//! the log shows the split.
 
 use std::sync::Arc;
 
 use gridcraft_engine::core::{CellRef, MAX_COLS, MAX_ROWS, Value};
-use gridcraft_engine::model::{CellStore, Workbook};
+use gridcraft_engine::model::{CellStore, Sheet, Workbook};
 use gridcraft_engine::{DocState, HistoryEntry, Selection, Session, UNDO_LIMIT, find_command};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -60,13 +68,14 @@ const OWN_ZOOM: &[&str] = &["view.zoom", "view.zoom100", "view.zoomToSelection"]
 const SNAPSHOT_EVERY: usize = 16;
 const SNAPSHOTS: usize = 16;
 /// A member whose edits take the log past a multiple of this many ops shares a full copy of the
-/// workbook: startup then replays at most about this many ops, and the chat stores one copy per
-/// this many ops (each the whole workbook, so not much more often).
+/// workbook, once the ops since the last copy take at least as many bytes as it did: startup then
+/// replays at most about this many ops (more for a big workbook), and the copies the chat stores
+/// take no more than about the ops themselves.
 const SHARE_EVERY: usize = 256;
 /// Shared copies kept until used, the furthest along first (an older one is only needed when a
 /// newer one doesn't match the ops' order). Bounds memory; fakes claiming to be further along can
 /// crowd out the real ones, which costs a full replay, nothing more.
-const SHARED_KEPT: usize = 4;
+pub const SHARED_KEPT: usize = 4;
 /// The shared copy's format; other versions are ignored.
 const SHARED_VERSION: u32 = 1;
 /// Deepest path a patch may have; a remote op with a deeper one is refused.
@@ -137,6 +146,17 @@ pub struct Collab {
     shared: Vec<(usize, u64, Vec<u8>)>,
     /// This member's edits just took the log past a multiple of `SHARE_EVERY`: share a copy.
     due: bool,
+    /// The shared workbook as the ops applied leave it. What else changes it here (`view.split`,
+    /// the view modes and other commands that aren't shared, the grid's own changes) stays this
+    /// member's, though it carries into what the commands run after it leave.
+    last: Arc<Workbook>,
+    /// Something changed the shared workbook here without being shared before an op ran on top of
+    /// it: this member's workbook is no longer exactly what the ops leave, so it shares no copies.
+    // ponytail: until the app restarts. Send such commands as ops (or rebuild by replaying) if
+    // copies get rare.
+    drift: bool,
+    /// The furthest copy known to match the ops: how many ops it stands for, and its size.
+    copied: (usize, usize),
 }
 
 impl Collab {
@@ -149,7 +169,22 @@ impl Collab {
         s.host_undo = Some(base.uid);
         let ydoc = Doc::with_client_id(client_id);
         let ops = ydoc.get_or_insert_array("ops");
-        Some(Collab { ydoc, ops, applied: vec![], uid: base.uid, base, snapshots: vec![], undo: vec![], redo: vec![], shared: vec![], due: false })
+        let last = base.wb.clone();
+        Some(Collab {
+            ydoc,
+            ops,
+            applied: vec![],
+            uid: base.uid,
+            base,
+            snapshots: vec![],
+            undo: vec![],
+            redo: vec![],
+            shared: vec![],
+            due: false,
+            last,
+            drift: false,
+            copied: (0, 0),
+        })
     }
 
     /// [`DocState::uid`] of the shared document.
@@ -187,6 +222,8 @@ impl Collab {
         // The first undo or redo: it hasn't changed the workbook here yet.
         let mut stale = None;
         for e in edits {
+            self.drift |= !same_shared(&e.before, &self.last);
+            self.last = e.after.clone();
             let undo = e.id == "edit.undo";
             if undo || e.id == "edit.redo" {
                 let steps = e.params.get("steps").and_then(Json::as_u64).unwrap_or(1).max(1);
@@ -233,29 +270,38 @@ impl Collab {
                 self.mirror(s);
             }
         }
-        // Only the member whose own edit crosses the line shares, so it's rarely two at once.
-        self.due |= self.applied.len() / SHARE_EVERY > before / SHARE_EVERY;
+        // Only the member whose own edit crosses the line shares, so it's rarely two at once; and
+        // only once the ops since the last copy weigh as much as it did.
+        let (n, size) = self.copied;
+        let since: usize = self.applied.get(n..).unwrap_or_default().iter().map(|op| op.len()).sum();
+        self.due |= self.applied.len() / SHARE_EVERY > before / SHARE_EVERY && since >= size;
         Some(update)
     }
 
     /// A full copy of the shared workbook for the chat, once this member's edits have taken the
     /// log past a multiple of `SHARE_EVERY` ops ([`Collab::local`]), if it encodes to at most
     /// `max` bytes. A bigger one isn't shared (the messenger would refuse it); the next multiple
-    /// tries again.
+    /// tries again. It is the workbook as the ops leave it, without what only this member did
+    /// after the last op; once such a change carried into an op, this member shares none
+    /// (`Collab::last`).
     // ponytail: no chunking; a workbook past the messenger's limit (about 22 MB in Delta Chat, 128 KB
     // where a messenger doesn't say) keeps replaying the whole log. Split the copy into parts if
     // such chats get slow to open.
-    pub fn share(&mut self, s: &Session, max: usize) -> Option<Vec<u8>> {
+    pub fn share(&mut self, max: usize) -> Option<Vec<u8>> {
         if !std::mem::take(&mut self.due) {
             return None;
         }
-        let d = s.documents().iter().find(|d| d.uid == self.uid)?;
+        if self.drift {
+            log::info!("not sharing a copy of the workbook: it has changes here that weren't shared");
+            return None;
+        }
         let n = self.applied.len();
-        let json = serde_json::to_vec(&Shared { v: SHARED_VERSION, n, h: fingerprint(&self.applied), wb: &*d.wb }).ok()?;
+        let json = serde_json::to_vec(&Shared { v: SHARED_VERSION, n, h: fingerprint(&self.applied), wb: &*self.last }).ok()?;
         if json.len() > max {
             log::info!("the workbook ({} KB) is too big to share a copy of", json.len() / 1000);
             return None;
         }
+        self.copied = (n, json.len());
         Some(json)
     }
 
@@ -263,14 +309,21 @@ impl Collab {
     /// replayed, they start from the furthest copy that matches them. Hostile input: an
     /// unreadable one is ignored, and a wrong one is only read once it matches the ops.
     pub fn offer(&mut self, json: Vec<u8>) {
-        let head = match serde_json::from_slice::<Shared<serde::de::IgnoredAny>>(&json) {
-            Ok(head) if head.v == SHARED_VERSION && head.n > 0 => head,
+        let (n, h) = match head(&json) {
+            Some((v, n, h)) if v == SHARED_VERSION && n > 0 => (n, h),
             _ => return log::warn!("ignored an unreadable copy of the shared workbook"),
         };
-        if self.shared.iter().any(|(n, h, _)| (*n, *h) == (head.n, head.h)) {
+        // One this member is past: no use, but it tells when the next copy is due.
+        if n <= self.applied.len() {
+            if n > self.copied.0 && self.applied.get(..n).is_some_and(|ops| fingerprint(ops) == h) {
+                self.copied = (n, json.len());
+            }
             return;
         }
-        self.shared.push((head.n, head.h, json));
+        if self.shared.iter().any(|(m, g, _)| (*m, *g) == (n, h)) {
+            return;
+        }
+        self.shared.push((n, h, json));
         self.shared.sort_by_key(|(n, _, _)| std::cmp::Reverse(*n));
         self.shared.truncate(SHARED_KEPT);
     }
@@ -345,6 +398,7 @@ impl Collab {
         }) else {
             return;
         };
+        self.drift |= s.active().is_some_and(|d| !same_shared(&d.wb, &self.last));
         let (clipboard, painter, edits, author) = (s.clipboard.take(), s.format_painter.take(), s.edits.take(), s.prefs.user_name.clone());
 
         if same < self.applied.len() {
@@ -356,11 +410,12 @@ impl Collab {
             self.applied.truncate(n);
         }
         let opened = ops.get(same..).unwrap_or_default().iter().any(|op| opens(op));
-        if let Some((n, doc)) = self.shared_copy(&ops) {
+        if let Some((n, doc, size)) = self.shared_copy(&ops) {
             if let Some(d) = s.active_mut() {
                 *d = doc;
             }
             self.applied = ops.get(..n).unwrap_or_default().to_vec();
+            self.copied = (n, size);
             self.snapshot(s, n);
         }
         // Copies no further along than this are no use now.
@@ -388,6 +443,7 @@ impl Collab {
             d.selection = selection;
             // A rollback can bring an older revision back; the UI must see a new one.
             d.revision = d.revision.max(revision + 1);
+            self.last = d.wb.clone();
         }
         (s.clipboard, s.format_painter, s.edits, s.prefs.user_name) = (clipboard, painter, edits, author);
         s.take_ui_requests();
@@ -412,8 +468,8 @@ impl Collab {
     }
 
     /// The furthest shared copy beyond the ops applied whose fingerprint matches `ops`, as the
-    /// number of ops it stands for and the shared document it makes.
-    fn shared_copy(&self, ops: &[Arc<str>]) -> Option<(usize, DocState)> {
+    /// number of ops it stands for, the shared document it makes and its size.
+    fn shared_copy(&self, ops: &[Arc<str>]) -> Option<(usize, DocState, usize)> {
         let from = self.applied.len();
         for (n, h, json) in &self.shared {
             if *n <= from || ops.get(..*n).is_none_or(|ops| fingerprint(ops) != *h) {
@@ -426,7 +482,7 @@ impl Collab {
                     // Formula results and spills: as replaying a workbook op does.
                     doc.calc.recalc_all(&mut wb);
                     doc.wb = Arc::new(wb);
-                    return Some((*n, doc));
+                    return Some((*n, doc, json.len()));
                 }
                 _ => log::warn!("ignored a damaged copy of the shared workbook"),
             }
@@ -506,6 +562,36 @@ fn replay(s: &mut Session, json: &str) {
             }
         }
     }
+}
+
+/// Whether `a` and `b` are the same shared workbook: equal but for what each member keeps their
+/// own (the active sheet, and each sheet's active cell and scroll position the grid saves in it).
+fn same_shared(a: &Arc<Workbook>, b: &Arc<Workbook>) -> bool {
+    if Arc::ptr_eq(a, b) {
+        return true;
+    }
+    let rest = |wb: &Workbook| Workbook { sheets: vec![], active_sheet: 0, ..wb.clone() };
+    a.sheets.len() == b.sheets.len()
+        && a.sheets
+            .iter()
+            .zip(&b.sheets)
+            .all(|(x, y)| Arc::ptr_eq(x, y) || Sheet { view_active: x.view_active, view_top_left: x.view_top_left, ..Sheet::clone(y) } == **x)
+        && rest(a) == rest(b)
+}
+
+/// A shared copy's version, `n` and `h`, read off its front without reading the workbook: a copy
+/// starts `{"v":…,"n":…,"h":…,"wb":` as [`Collab::share`] writes it; any other layout is ignored.
+fn head(json: &[u8]) -> Option<(u32, usize, u64)> {
+    let mut rest = json;
+    let mut field = |key: &str| -> Option<u64> {
+        rest = rest.strip_prefix(key.as_bytes())?;
+        let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+        let value = std::str::from_utf8(rest.get(..digits)?).ok()?.parse().ok()?;
+        rest = rest.get(digits..)?;
+        Some(value)
+    };
+    let (v, n, h) = (field(r#"{"v":"#)?, field(r#","n":"#)?, field(r#","h":"#)?);
+    rest.starts_with(br#","wb":"#).then_some((u32::try_from(v).ok()?, usize::try_from(n).ok()?, h))
 }
 
 /// Identifies a run of ops, in order, the same in every build: FNV-1a over each op's length and
@@ -1006,10 +1092,10 @@ mod tests {
     fn opening_from_a_shared_copy_equals_replaying_everything() {
         let mut a = peer(1);
         let first = edits(&mut a, 1, SHARE_EVERY + 4);
-        let copy = a.1.share(&a.0, usize::MAX).expect("crossing the line shares a copy");
-        assert!(a.1.share(&a.0, usize::MAX).is_none(), "once");
+        let copy = a.1.share(usize::MAX).expect("crossing the line shares a copy");
+        assert!(a.1.share(usize::MAX).is_none(), "once");
         let rest = edits(&mut a, 1000, 5);
-        assert!(a.1.share(&a.0, usize::MAX).is_none(), "not again before the next multiple");
+        assert!(a.1.share(usize::MAX).is_none(), "not again before the next multiple");
         // Old updates without copies still load; with a copy, the same workbook.
         let (mut full, mut quick) = (peer(2), peer(3));
         full.1.remote(&mut full.0, vec![first.clone(), rest.clone()]);
@@ -1025,8 +1111,8 @@ mod tests {
         assert_eq!(workbook(&a.0), workbook(&quick.0));
         assert_eq!(workbook(&a.0), workbook(&full.0));
         // The copy really stands in for its ops: one doctored to match them is what loads.
-        let mut doctored: Json = serde_json::from_slice(&copy).unwrap();
-        doctored["wb"]["sheets"][0]["name"] = json!("Copied");
+        let mut doctored: Shared<Workbook> = serde_json::from_slice(&copy).unwrap();
+        Arc::make_mut(&mut doctored.wb.sheets[0]).name = "Copied".into();
         let mut c = peer(4);
         c.1.offer(serde_json::to_vec(&doctored).unwrap());
         c.1.remote(&mut c.0, vec![first, rest]);
@@ -1044,7 +1130,7 @@ mod tests {
             // copies, of which at most one matches the order everyone ends up with.
             let ua = edits(&mut a, 100, SHARE_EVERY);
             let ub = edits(&mut b, 600, SHARE_EVERY);
-            let copies = [a.1.share(&a.0, usize::MAX).unwrap(), b.1.share(&b.0, usize::MAX).unwrap()];
+            let copies = [a.1.share(usize::MAX).unwrap(), b.1.share(usize::MAX).unwrap()];
             a.1.remote(&mut a.0, vec![ub.clone()]);
             b.1.remote(&mut b.0, vec![ua.clone()]);
             assert_eq!(workbook(&a.0), workbook(&b.0));
@@ -1074,25 +1160,96 @@ mod tests {
         let update = edits(&mut a, 1, SHARE_EVERY);
         let (n, h) = (a.1.applied.len(), fingerprint(&a.1.applied));
         // Too big for the messenger: not shared at all.
-        assert!(a.1.share(&a.0, 100).is_none());
+        assert!(a.1.share(100).is_none());
         let mut no_sheets = Workbook::new();
         no_sheets.sheets.clear();
+        let copy = |v: u32, n: usize, h: u64, wb: Json| serde_json::to_vec(&Shared { v, n, h, wb }).unwrap();
+        let blank = serde_json::to_value(Workbook::new()).unwrap();
         let mut b = peer(2);
         for junk in [
             vec![],
             vec![0xff; 40],
             b"{}".to_vec(),
-            json!({"v": 1, "n": n, "h": h, "wb": {"sheets": "no"}}).to_string().into_bytes(),
-            json!({"v": 1, "n": n, "h": h, "wb": no_sheets}).to_string().into_bytes(),
-            json!({"v": 1, "n": n, "h": h ^ 1, "wb": Workbook::new()}).to_string().into_bytes(),
-            json!({"v": 1, "n": n + 1, "h": h, "wb": Workbook::new()}).to_string().into_bytes(),
-            json!({"v": 99, "n": n, "h": h, "wb": Workbook::new()}).to_string().into_bytes(),
+            // Another layout than `share` writes, a number too big, one cut short.
+            json!({"v": 1, "n": n, "h": h, "wb": blank}).to_string().into_bytes(),
+            format!(r#"{{"v":1,"n":{n}0000000000000000000000,"h":{h},"wb":{{}}}}"#).into_bytes(),
+            format!(r#"{{"v":1,"n":{n},"h":"#).into_bytes(),
+            copy(1, n, h, json!({"sheets": "no"})),
+            copy(1, n, h, serde_json::to_value(no_sheets).unwrap()),
+            copy(1, n, h ^ 1, blank.clone()),
+            copy(1, n + 1, h, blank.clone()),
+            copy(99, n, h, blank.clone()),
         ] {
             b.1.offer(junk);
         }
         b.1.remote(&mut b.0, vec![update]);
         assert_eq!(workbook(&a.0), workbook(&b.0));
         assert_eq!(value(&mut b.0, "A7").as_f64(), Some(7.0));
+    }
+
+    #[test]
+    fn a_copy_leaves_out_what_was_never_shared() {
+        let mut a = peer(1);
+        let first = edits(&mut a, 1, SHARE_EVERY + 1);
+        // Commands that change the workbook here alone: they aren't sent as ops.
+        run(&mut a.0, "selection.set", json!({"range": "C3"}));
+        run(&mut a.0, "view.split", json!({}));
+        run(&mut a.0, "view.pageLayout", json!({}));
+        assert!(a.0.active().unwrap().wb.sheets[0].freeze.is_some());
+        let copy = a.1.share(usize::MAX).expect("crossing the line shares a copy");
+        let (mut full, mut quick) = (peer(2), peer(3));
+        full.1.remote(&mut full.0, vec![first.clone()]);
+        quick.1.offer(copy);
+        quick.1.remote(&mut quick.0, vec![first]);
+        assert!(quick.1.snapshots.iter().any(|(k, _)| *k == SHARE_EVERY + 1), "the copy was used");
+        assert_eq!(workbook(&full.0), workbook(&quick.0));
+        assert!(quick.0.active().unwrap().wb.sheets[0].freeze.is_none());
+        // Once such a change carries into the ops run here, this member shares no copies.
+        assert!(!a.1.drift);
+        edits(&mut a, 1000, 2 * SHARE_EVERY);
+        assert!(a.1.drift);
+        assert!(a.1.share(usize::MAX).is_none());
+        // Moving around (the active sheet, the active cell and scroll position the grid saves)
+        // is no such change.
+        let mut b = peer(4);
+        edits(&mut b, 1, 1);
+        run(&mut b.0, "home.insertSheet", json!({}));
+        b.1.local(&mut b.0);
+        run(&mut b.0, "sheet.activate", json!({"sheet": 0}));
+        b.0.active_mut().unwrap().store_view(&[(0, CellRef { row: 40, col: 3 })]);
+        edits(&mut b, 2, SHARE_EVERY);
+        assert!(!b.1.drift);
+        assert!(b.1.share(usize::MAX).is_some());
+    }
+
+    #[test]
+    fn copies_wait_until_the_ops_since_weigh_as_much() {
+        let mut a = peer(1);
+        for r in 1..=7 {
+            run(&mut a.0, "cell.set", json!({"cell": format!("Z{r}"), "input": "x".repeat(30_000)}));
+        }
+        let mut updates = vec![edits(&mut a, 1, SHARE_EVERY)];
+        let first = a.1.share(usize::MAX).expect("the first copy");
+        let (mut since, mut skipped, mut r) = (0, 0, 1000);
+        loop {
+            let before = a.1.applied.len();
+            updates.push(edits(&mut a, r, SHARE_EVERY));
+            r += SHARE_EVERY;
+            since += a.1.applied[before..].iter().map(|op| op.len()).sum::<usize>();
+            if a.1.share(usize::MAX).is_some() {
+                assert!(since >= first.len());
+                break;
+            }
+            assert!(since < first.len());
+            skipped += 1;
+            assert!(skipped < 20);
+        }
+        assert!(skipped > 0);
+        // A copy someone else shared counts as well.
+        let mut b = peer(2);
+        b.1.remote(&mut b.0, updates);
+        b.1.offer(first.clone());
+        assert_eq!(b.1.copied, (SHARE_EVERY + 7, first.len()));
     }
 
     #[test]
