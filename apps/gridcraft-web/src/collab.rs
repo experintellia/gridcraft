@@ -293,11 +293,11 @@ impl Collab {
             if d.wb.active_sheet != sheet {
                 Arc::make_mut(&mut d.wb).active_sheet = sheet;
             }
-            if d.wb.sheets.iter().zip(&zooms).any(|(sh, (name, z))| sh.name == *name && sh.zoom != *z) {
-                for (sh, (name, z)) in Arc::make_mut(&mut d.wb).sheets.iter_mut().zip(&zooms) {
-                    if sh.name == *name && sh.zoom != *z {
-                        Arc::make_mut(sh).zoom = *z;
-                    }
+            // By name: a sheet someone moved keeps this member's zoom.
+            for (name, z) in &zooms {
+                let Some(i) = d.wb.sheets.iter().position(|sh| sh.name == *name && sh.zoom != *z) else { continue };
+                if let Some(sh) = Arc::make_mut(&mut d.wb).sheets.get_mut(i) {
+                    Arc::make_mut(sh).zoom = *z;
                 }
             }
             d.selection = selection;

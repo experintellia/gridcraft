@@ -5,7 +5,7 @@ Releases of the webxdc fork (`experintellia/gridcraft`, branch `webxdc`). Each r
 ## Unreleased
 
 ### Shared workbook
-- Zoom is each member's own: zooming no longer changes everyone's view, and others' edits keep your zoom.
+- Zoom is each member's own: zooming no longer changes everyone's view, and others' edits keep your zoom ([#29](https://github.com/experintellia/gridcraft/pull/29)).
 
 ## v0.1.0 — 2026-10-21
 
