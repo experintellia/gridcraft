@@ -319,35 +319,85 @@ fn a_tap_on_the_text_input_over_the_active_cell_still_edits_it() {
 }
 
 #[test]
-fn a_drag_from_the_text_input_over_the_active_cell_selects() {
+fn a_drag_from_the_text_input_over_the_active_cell_pans() {
     let mut h = harness();
     let (d5, f7) = (center(&h, CellRef::new(4, 3)), center(&h, CellRef::new(6, 5)));
-    tap(&mut h, d5, true);
-    // A second later (no double-click), the text input lies over D5.
+    tap(&mut h, f7, true);
+    // A second later (no double-click), the text input lies over F7.
     h.run_steps(60);
-    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_some_and(|z| z.contains(d5)));
-    // What the web shell sends for a drag that began on its text input.
-    for (phase, pos) in [(TouchPhase::Start, d5), (TouchPhase::Move, d5 + vec2(12.0, 12.0)), (TouchPhase::Move, f7), (TouchPhase::End, f7)] {
+    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_some_and(|z| z.contains(f7)));
+    // What the web shell sends for a drag that began on its text input: it reaches the grid, where one finger pans.
+    for (phase, pos) in [(TouchPhase::Start, f7), (TouchPhase::Move, f7 - vec2(12.0, 12.0)), (TouchPhase::Move, d5), (TouchPhase::End, d5)] {
         h.input_mut().events.extend(gridcraft_ui_egui::finger_events(phase, TouchId(2), pos));
         h.step();
     }
     h.step();
     assert!(h.state().editor.is_none(), "a drag doesn't edit");
-    assert_eq!(h.state().session.active().unwrap().selection.a1(), "D5:F7");
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "F7", "a drag doesn't select");
+    let scroll = h.state().view().scroll;
+    assert!(scroll.x > 0.0 && scroll.y > 0.0, "dragging up and left scrolls down and right: {scroll:?}");
 }
 
 #[test]
 fn a_long_press_on_the_text_input_over_the_active_cell_opens_the_context_menu() {
     let mut h = harness();
     let c3 = center(&h, CellRef::new(2, 2));
-    h.input_mut().events.extend(gridcraft_ui_egui::long_press_events(c3));
+    h.input_mut().events.extend(gridcraft_ui_egui::long_press_events(TouchPhase::Start, c3));
     h.step();
-    // The finger lifts.
-    h.input_mut().events.push(Event::PointerGone);
+    assert!(h.state().grid.context_menu.is_none(), "the menu waits for the finger to lift");
+    h.input_mut().events.extend(gridcraft_ui_egui::long_press_events(TouchPhase::End, c3));
     h.step();
     assert!(h.state().grid.context_menu.is_some());
     assert!(h.state().editor.is_none());
     assert_eq!(h.state().session.active().unwrap().selection.a1(), "C3");
+}
+
+#[test]
+fn a_long_press_on_the_text_input_over_the_active_cell_then_a_drag_selects() {
+    let mut h = harness();
+    let (c3, e5) = (center(&h, CellRef::new(2, 2)), center(&h, CellRef::new(4, 4)));
+    h.input_mut().events.extend(gridcraft_ui_egui::long_press_events(TouchPhase::Start, c3));
+    h.step();
+    for phase_pos in [(TouchPhase::Move, c3 + vec2(12.0, 12.0)), (TouchPhase::Move, e5), (TouchPhase::End, e5)] {
+        h.input_mut().events.extend(gridcraft_ui_egui::long_press_events(phase_pos.0, phase_pos.1));
+        h.step();
+    }
+    h.step();
+    assert!(h.state().grid.context_menu.is_none(), "a drag opens no menu");
+    assert!(h.state().editor.is_none());
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "C3:E5");
+    assert_eq!(h.state().view().scroll, vec2(0.0, 0.0), "it doesn't pan");
+}
+
+#[test]
+fn a_long_press_then_a_drag_selects() {
+    let mut h = harness();
+    let (d5, f7) = (center(&h, CellRef::new(4, 3)), center(&h, CellRef::new(6, 5)));
+    h.input_mut().events.extend(gridcraft_ui_egui::finger_events(TouchPhase::Start, TouchId(3), d5));
+    // Held still for a second: egui's long touch.
+    h.run_steps(60);
+    assert!(h.state().grid.context_menu.is_none(), "the menu waits for the finger to lift");
+    for (phase, pos) in [(TouchPhase::Move, d5 + vec2(12.0, 12.0)), (TouchPhase::Move, f7), (TouchPhase::End, f7)] {
+        h.input_mut().events.extend(gridcraft_ui_egui::finger_events(phase, TouchId(3), pos));
+        h.step();
+    }
+    h.step();
+    assert!(h.state().grid.context_menu.is_none(), "a drag opens no menu");
+    assert!(h.state().editor.is_none());
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "D5:F7");
+    assert_eq!(h.state().view().scroll, vec2(0.0, 0.0), "it doesn't pan");
+}
+
+#[test]
+fn a_long_press_lifted_still_opens_the_context_menu() {
+    let mut h = harness();
+    let d5 = center(&h, CellRef::new(4, 3));
+    h.input_mut().events.extend(gridcraft_ui_egui::finger_events(TouchPhase::Start, TouchId(3), d5));
+    h.run_steps(60);
+    h.input_mut().events.extend(gridcraft_ui_egui::finger_events(TouchPhase::End, TouchId(3), d5));
+    h.run_steps(2);
+    assert!(h.state().grid.context_menu.is_some());
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "D5");
 }
 
 #[test]

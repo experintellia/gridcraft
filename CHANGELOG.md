@@ -4,6 +4,9 @@ Releases of the webxdc fork (`experintellia/gridcraft`, branch `webxdc`). Each r
 
 ## Unreleased
 
+- Synced with upstream GridCraft 0.10.0 (`storytold/gridcraft` `2ebdf16`): everything upstream shipped since 0.6.1, among it CSV/TSV open as text, Ctrl+Shift+= / Ctrl+- on whole rows and columns, right-to-left fixes and pivot table grand totals.
+- One finger dragging on the sheet now scrolls it, as upstream does on every touch screen, including a drag from the active cell. To select a range, long-press a cell and drag on without lifting; a long press lifted without moving still opens the context menu (now when the finger lifts). A tap still selects.
+
 ### Shared workbook
 - Zoom is each member's own: zooming no longer changes everyone's view, and others' edits keep your zoom ([#29](https://github.com/experintellia/gridcraft/pull/29)).
 

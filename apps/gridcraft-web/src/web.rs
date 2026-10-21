@@ -205,7 +205,8 @@ const TAP_SLOP: i32 = 10;
 
 /// Touches that begin on the text input over the active cell go to the input, not to eframe's canvas listeners. Once
 /// one turns into a drag or a long press it belongs to the grid: its events go to egui (as eframe sends a finger on
-/// the canvas, and a long press as the secondary click that opens the context menu) and the browser's own handling
+/// the canvas, and a long press as a held secondary press: dragged on, it selects; lifted, it opens the context menu)
+/// and the browser's own handling
 /// (text selection, the text menu) is prevented. The input also lies over the text fields
 /// ([`gridcraft_ui_egui::text_zones`]): a drag or long press that begins on one goes to egui at the field the same way.
 /// Returns the events for [`WebShell`] to hand egui.
@@ -244,7 +245,7 @@ fn forward_cell_gestures(ctx: egui::Context) -> Rc<Cell<Vec<egui::Event>>> {
         Rc::new(move || {
             let Some(t) = touch.get().filter(|t| t.gesture == Gesture::Tap) else { return };
             touch.set(Some(CellTouch { gesture: Gesture::LongPress, ..t }));
-            send(gridcraft_ui_egui::long_press_events(at(t.x, t.y)));
+            send(gridcraft_ui_egui::long_press_events(egui::TouchPhase::Start, at(t.x, t.y)));
         })
     };
     // Held still as long as egui waits for a long press elsewhere on the grid.
@@ -286,10 +287,14 @@ fn forward_cell_gestures(ctx: egui::Context) -> Rc<Cell<Vec<egui::Event>>> {
                 touch.set(Some(t));
                 send(gridcraft_ui_egui::finger_events(egui::TouchPhase::Start, t.id.into(), at(t.x, t.y)));
             }
-            if t.gesture == Gesture::Drag {
-                send(gridcraft_ui_egui::finger_events(egui::TouchPhase::Move, t.id.into(), at(now.client_x(), now.client_y())));
-                touch.set(Some(CellTouch { x: now.client_x(), y: now.client_y(), ..t }));
+            let pos = at(now.client_x(), now.client_y());
+            match t.gesture {
+                Gesture::Drag => send(gridcraft_ui_egui::finger_events(egui::TouchPhase::Move, t.id.into(), pos)),
+                // Dragging on from a long press selects.
+                Gesture::LongPress => send(gridcraft_ui_egui::long_press_events(egui::TouchPhase::Move, pos)),
+                Gesture::Tap => {}
             }
+            touch.set(Some(CellTouch { x: now.client_x(), y: now.client_y(), ..t }));
             e.prevent_default();
             e.stop_propagation();
         }
@@ -309,7 +314,7 @@ fn forward_cell_gestures(ctx: egui::Context) -> Rc<Cell<Vec<egui::Event>>> {
                     let phase = if e.type_() == "touchcancel" { egui::TouchPhase::Cancel } else { egui::TouchPhase::End };
                     send(gridcraft_ui_egui::finger_events(phase, t.id.into(), at(now.client_x(), now.client_y())));
                 }
-                Gesture::LongPress => send(vec![egui::Event::PointerGone]),
+                Gesture::LongPress => send(gridcraft_ui_egui::long_press_events(egui::TouchPhase::End, at(now.client_x(), now.client_y()))),
             }
             // No focus (and keyboard) or text menu after it, and eframe's own listeners on the document skip it.
             e.prevent_default();
