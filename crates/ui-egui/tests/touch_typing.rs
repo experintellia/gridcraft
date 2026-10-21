@@ -319,21 +319,23 @@ fn a_tap_on_the_text_input_over_the_active_cell_still_edits_it() {
 }
 
 #[test]
-fn a_drag_from_the_text_input_over_the_active_cell_selects() {
+fn a_drag_from_the_text_input_over_the_active_cell_pans() {
     let mut h = harness();
     let (d5, f7) = (center(&h, CellRef::new(4, 3)), center(&h, CellRef::new(6, 5)));
-    tap(&mut h, d5, true);
-    // A second later (no double-click), the text input lies over D5.
+    tap(&mut h, f7, true);
+    // A second later (no double-click), the text input lies over F7.
     h.run_steps(60);
-    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_some_and(|z| z.contains(d5)));
-    // What the web shell sends for a drag that began on its text input.
-    for (phase, pos) in [(TouchPhase::Start, d5), (TouchPhase::Move, d5 + vec2(12.0, 12.0)), (TouchPhase::Move, f7), (TouchPhase::End, f7)] {
+    assert!(gridcraft_ui_egui::cell_zone(&h.ctx).is_some_and(|z| z.contains(f7)));
+    // What the web shell sends for a drag that began on its text input: it reaches the grid, where one finger pans.
+    for (phase, pos) in [(TouchPhase::Start, f7), (TouchPhase::Move, f7 - vec2(12.0, 12.0)), (TouchPhase::Move, d5), (TouchPhase::End, d5)] {
         h.input_mut().events.extend(gridcraft_ui_egui::finger_events(phase, TouchId(2), pos));
         h.step();
     }
     h.step();
     assert!(h.state().editor.is_none(), "a drag doesn't edit");
-    assert_eq!(h.state().session.active().unwrap().selection.a1(), "D5:F7");
+    assert_eq!(h.state().session.active().unwrap().selection.a1(), "F7", "a drag doesn't select");
+    let scroll = h.state().view().scroll;
+    assert!(scroll.x > 0.0 && scroll.y > 0.0, "dragging up and left scrolls down and right: {scroll:?}");
 }
 
 #[test]
