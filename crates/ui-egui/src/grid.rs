@@ -154,6 +154,18 @@ pub struct GridState {
     pub wheel_zoom: Option<WheelZoom>,
     /// A one-finger touch drag in progress: it pans the sheet instead of selecting.
     pub touch_pan: bool,
+    /// A long press on a cell, still held: a drag from it selects (see [`TouchSelect`]).
+    pub touch_select: Option<TouchSelect>,
+}
+
+/// A long press on a cell, still held. Dragging from it selects a range (one finger otherwise pans); lifting without
+/// moving opens the context menu.
+#[derive(Clone, Copy, Debug)]
+pub struct TouchSelect {
+    /// Where the finger pressed.
+    pub from: Pos2,
+    /// Whether it has moved away since.
+    pub moved: bool,
 }
 
 /// Ctrl+wheel zoom for one (doc uid, sheet). egui eases a notch in over several frames and
@@ -772,11 +784,50 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     }
     // Interaction.
     let previous_popups = (app.grid.filter_menu, app.grid.list_picker, app.grid.header_menu);
+    // A long press on a cell starts a touch selection: egui's own long touch, or the web shell's held secondary press
+    // (`long_press_events`) for one on its text input over the active cell.
+    let long_press = resp.long_touched()
+        || (crate::touch_screen(ui.ctx()) && resp.contains_pointer() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary)));
+    if long_press
+        && app.editor.is_none()
+        && let Some(p) = ui.input(|i| i.pointer.interact_pos()).filter(|p| geo.cells.contains(*p))
+    {
+        app.grid.touch_select = Some(TouchSelect { from: p, moved: false });
+    }
+    let touch_selecting = app.grid.touch_select.is_some();
+    if let Some(mut touch) = app.grid.touch_select {
+        let (down, at) = ui.input(|i| (i.pointer.any_down(), i.pointer.latest_pos()));
+        let slop = ui.ctx().options(|o| o.input_options.max_click_dist);
+        let cell = geo.cell_at(sh, touch.from);
+        match at.filter(|_| down) {
+            Some(p) if touch.moved || p.distance(touch.from) > slop => {
+                if !touch.moved {
+                    let _ = app.session.run("selection.set", json!({"cell": cell.a1()}));
+                }
+                touch.moved = true;
+                select_to_pointer(app, &geo, sh, &wb, p);
+                app.grid.touch_select = Some(touch);
+            }
+            Some(_) => {}
+            // Lifted: without moving, it was a long press for the context menu.
+            None => {
+                if !touch.moved {
+                    if !app.session.active().is_some_and(|d| d.selection.contains(cell)) {
+                        let _ = app.session.run("selection.set", json!({"cell": cell.a1()}));
+                    }
+                    app.grid.context_menu = Some(geo.mirror_pos(touch.from));
+                }
+                app.grid.touch_select = None;
+            }
+        }
+    }
     // A pan the grid never saw end (it was hidden mid-drag) must not swallow the next press.
     if app.grid.touch_pan && !resp.dragged() && !resp.drag_stopped() {
         app.grid.touch_pan = false;
     }
-    if app.grid.touch_pan {
+    if touch_selecting {
+        // A touch selection's frames are its own, its release included (`interact` would open the context menu).
+    } else if app.grid.touch_pan {
         // Skip the frames of a touch pan, its release included.
         if !resp.dragged() {
             app.grid.touch_pan = false;

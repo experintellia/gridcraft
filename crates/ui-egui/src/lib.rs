@@ -1438,11 +1438,17 @@ pub fn finger_events(phase: egui::TouchPhase, id: egui::TouchId, pos: egui::Pos2
     }
 }
 
-/// A long press at `pos` (points), as the secondary click that opens the context menu, for a long press on the web
-/// shell's text input over [`cell_zone`].
-pub fn long_press_events(pos: egui::Pos2) -> Vec<egui::Event> {
-    let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE };
-    vec![egui::Event::PointerMoved(pos), button(true), button(false)]
+/// A long press on the web shell's text input over [`cell_zone`], at `pos` (points): a secondary press held as it
+/// lands, moves, a release as it lifts. The grid selects from the cell to wherever it is dragged, or opens the context
+/// menu when it lifts without moving.
+pub fn long_press_events(phase: egui::TouchPhase, pos: egui::Pos2) -> Vec<egui::Event> {
+    use egui::{Event, PointerButton, TouchPhase};
+    let button = |pressed| Event::PointerButton { pos, button: PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE };
+    match phase {
+        TouchPhase::Start => vec![Event::PointerMoved(pos), button(true)],
+        TouchPhase::Move => vec![Event::PointerMoved(pos)],
+        TouchPhase::End | TouchPhase::Cancel => vec![button(false), Event::PointerGone],
+    }
 }
 
 /// Publishes the active cell's keyboard zone (none while the cell doesn't show or keeps its tap); true when its text
