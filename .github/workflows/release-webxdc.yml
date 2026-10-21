@@ -56,7 +56,10 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" gridcraft.xdc --clobber
           else
+            # The tag's CHANGELOG.md section (`## <tag> — date` up to the next `## `) is the notes.
+            awk -v tag="$TAG" '/^## /{on = ($2 == tag); next} on' CHANGELOG.md > notes.md
+            [ -s notes.md ] || echo "GridCraft as a webxdc app: send gridcraft.xdc to a Delta Chat chat; everyone who opens it edits the same workbook." > notes.md
             gh release create "$TAG" gridcraft.xdc --target "$GITHUB_SHA" \
               --title "GridCraft $TAG (webxdc)" \
-              --notes "GridCraft as a webxdc app: send gridcraft.xdc to a Delta Chat chat; everyone who opens it edits the same workbook."
+              --notes-file notes.md
           fi
