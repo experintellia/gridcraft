@@ -2,6 +2,11 @@
 
 Releases of the webxdc fork (`experintellia/gridcraft`, branch `webxdc`). Each release attaches `gridcraft.xdc`: send it to a Delta Chat chat and everyone who opens it edits the same workbook. Tags are the fork's own versions, independent of upstream's `Cargo.toml` version.
 
+## Unreleased
+
+### Shared workbook
+- Zoom is each member's own: zooming no longer changes everyone's view, and others' edits keep your zoom.
+
 ## v0.1.0 — 2026-10-21
 
 ### Shared workbook
