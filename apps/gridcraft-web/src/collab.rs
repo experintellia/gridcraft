@@ -280,6 +280,7 @@ impl Collab {
             }
             self.applied.truncate(n);
         }
+        let opened = ops.get(same..).unwrap_or_default().iter().any(|op| opens(op));
         for op in ops.get(self.applied.len()..).unwrap_or_default() {
             replay(s, op);
             self.applied.push(op.clone());
@@ -293,8 +294,8 @@ impl Collab {
             if d.wb.active_sheet != sheet {
                 Arc::make_mut(&mut d.wb).active_sheet = sheet;
             }
-            // By name: a sheet someone moved keeps this member's zoom.
-            for (name, z) in &zooms {
+            // By name: a sheet someone moved keeps this member's zoom. An opened file's zoom stands.
+            for (name, z) in zooms.iter().filter(|_| !opened) {
                 let Some(i) = d.wb.sheets.iter().position(|sh| sh.name == *name && sh.zoom != *z) else { continue };
                 if let Some(sh) = Arc::make_mut(&mut d.wb).sheets.get_mut(i) {
                     Arc::make_mut(sh).zoom = *z;
@@ -334,6 +335,15 @@ impl Collab {
             }
         }
     }
+}
+
+/// Whether `op` opens a file.
+fn opens(op: &str) -> bool {
+    #[derive(Deserialize)]
+    struct Head {
+        c: String,
+    }
+    serde_json::from_str::<Head>(op).is_ok_and(|h| h.c == "file.open")
 }
 
 /// Runs one op on the active (shared) document, as its author ran it.
@@ -627,6 +637,21 @@ mod tests {
         assert_eq!(value(&mut a.0, "B1").as_f64(), Some(2.0));
         assert_eq!(a.0.active().unwrap().wb.sheets[0].zoom, 200);
         assert_eq!(b.0.active().unwrap().wb.sheets[0].zoom, 100);
+        // Undoing a change to the sheet list isn't refused for a different zoom.
+        run(&mut a.0, "home.insertSheet", json!({"name": "Two"}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!(b.0.active().unwrap().wb.sheets.len(), 2);
+        run(&mut a.0, "edit.undo", json!({}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!(b.0.active().unwrap().wb.sheets.len(), 1);
+        assert_eq!(a.0.active().unwrap().wb.sheets[0].zoom, 200);
+        // An opened file's zoom is everyone's to start with.
+        let mut wb = Workbook::new();
+        Arc::make_mut(&mut wb.sheets[0]).zoom = 150;
+        let update = a.1.open(&mut a.0, "zoomed.xlsx", wb).unwrap();
+        b.1.remote(&mut b.0, vec![update]);
+        assert_eq!(a.0.active().unwrap().wb.sheets[0].zoom, 150);
+        assert_eq!(b.0.active().unwrap().wb.sheets[0].zoom, 150);
     }
 
     #[test]
