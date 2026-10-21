@@ -20,6 +20,9 @@
 //! aren't compared (they're recalculated), and the style table only grows, so the style ids an
 //! undo puts back still name the same styles. Redo is the same patches the other way.
 //!
+//! Each member's zoom is their own, like the sheet they look at: zooming isn't shared, and their
+//! zoom survives what others do.
+//!
 //! An empty log means nobody has started the workbook yet; starting a blank one is an op that
 //! changes nothing ([`Collab::create`]).
 
@@ -37,6 +40,8 @@ use yrs::{Any, Array as _, ArrayRef, Doc, Out, ReadTxn as _, Transact as _, Upda
 const NEW: &str = "file.new";
 /// Commands that read the clipboard or the format painter.
 const LOCAL_STATE: &[&str] = &["edit.paste", "edit.pasteSpecial", "home.insertCopiedCells", "edit.formatPainter"];
+/// Commands that only change this member's zoom: not shared.
+const OWN_ZOOM: &[&str] = &["view.zoom", "view.zoom100", "view.zoomToSelection"];
 /// A snapshot every this many ops, keeping the last `SNAPSHOTS`.
 // ponytail: a reorder older than 256 ops replays the whole log; checkpoint the log into a
 // workbook op if long-lived chats make startup or rollbacks slow.
@@ -162,6 +167,9 @@ impl Collab {
                 }
                 continue;
             }
+            if OWN_ZOOM.contains(&e.id.as_str()) {
+                continue;
+            }
             let label = gridcraft_engine::find_command(&e.id).map_or_else(|| e.id.clone(), |c| c.label.trim_end_matches('…').to_string());
             push(&mut self.undo, Step { label, selection: e.selection.clone(), before: e.before, after: e.after.clone() });
             self.redo.clear();
@@ -257,7 +265,11 @@ impl Collab {
         let Some(i) = s.documents().iter().position(|d| d.uid == self.uid) else { return };
         let active = s.active_index();
         s.set_active(i);
-        let Some((sheet, selection, revision)) = s.active().map(|d| (d.wb.active_sheet, d.selection.clone(), d.revision)) else { return };
+        let Some((sheet, selection, revision, zooms)) = s.active().map(|d| {
+            (d.wb.active_sheet, d.selection.clone(), d.revision, d.wb.sheets.iter().map(|sh| (sh.name.clone(), sh.zoom)).collect::<Vec<_>>())
+        }) else {
+            return;
+        };
         let (clipboard, painter, edits, author) = (s.clipboard.take(), s.format_painter.take(), s.edits.take(), s.prefs.user_name.clone());
 
         if same < self.applied.len() {
@@ -268,6 +280,7 @@ impl Collab {
             }
             self.applied.truncate(n);
         }
+        let opened = ops.get(same..).unwrap_or_default().iter().any(|op| opens(op));
         for op in ops.get(self.applied.len()..).unwrap_or_default() {
             replay(s, op);
             self.applied.push(op.clone());
@@ -280,6 +293,13 @@ impl Collab {
             let sheet = sheet.min(d.wb.sheets.len().saturating_sub(1));
             if d.wb.active_sheet != sheet {
                 Arc::make_mut(&mut d.wb).active_sheet = sheet;
+            }
+            // By name: a sheet someone moved keeps this member's zoom. An opened file's zoom stands.
+            for (name, z) in zooms.iter().filter(|_| !opened) {
+                let Some(i) = d.wb.sheets.iter().position(|sh| sh.name == *name && sh.zoom != *z) else { continue };
+                if let Some(sh) = Arc::make_mut(&mut d.wb).sheets.get_mut(i) {
+                    Arc::make_mut(sh).zoom = *z;
+                }
             }
             d.selection = selection;
             // A rollback can bring an older revision back; the UI must see a new one.
@@ -315,6 +335,15 @@ impl Collab {
             }
         }
     }
+}
+
+/// Whether `op` opens a file.
+fn opens(op: &str) -> bool {
+    #[derive(Deserialize)]
+    struct Head {
+        c: String,
+    }
+    serde_json::from_str::<Head>(op).is_ok_and(|h| h.c == "file.open")
 }
 
 /// Runs one op on the active (shared) document, as its author ran it.
@@ -389,12 +418,14 @@ fn push(steps: &mut Vec<Step>, step: Step) {
 }
 
 /// The workbook as JSON, with each sheet's cells as one object keyed `row:col` and without formula
-/// results (recalculated). The active sheet is each member's own.
+/// results (recalculated). The active sheet and the zoom are each member's own.
 fn tree(wb: &Workbook) -> Option<Json> {
     let mut bare = wb.clone();
     bare.active_sheet = 0;
     for sheet in &mut bare.sheets {
-        Arc::make_mut(sheet).cells = CellStore::new();
+        let sheet = Arc::make_mut(sheet);
+        sheet.cells = CellStore::new();
+        sheet.zoom = 100;
     }
     let mut t = serde_json::to_value(&bare).ok()?;
     let empty = serde_json::to_value(Value::Empty).ok()?;
@@ -585,6 +616,42 @@ mod tests {
             // Each keeps its own selection.
             assert_eq!(b.0.active().unwrap().selection.ranges[0].a1(), "A1:A40");
         }
+    }
+
+    #[test]
+    fn zoom_is_each_members_own() {
+        let (mut a, mut b) = (peer(1), peer(2));
+        run(&mut a.0, "cell.set", json!({"cell": "A1", "input": "1"}));
+        sync(&mut [&mut a, &mut b]);
+        run(&mut a.0, "view.zoom", json!({"percent": 200}));
+        assert!(a.1.local(&mut a.0).is_none(), "zooming isn't shared");
+        // Nor is it undone.
+        assert_eq!(a.0.active().unwrap().undo.len(), 1);
+        // A's zoom survives B's edits, a rollback and A's undo.
+        run(&mut b.0, "cell.set", json!({"cell": "B1", "input": "2"}));
+        run(&mut a.0, "cell.set", json!({"cell": "C1", "input": "3"}));
+        sync(&mut [&mut a, &mut b]);
+        run(&mut a.0, "edit.undo", json!({}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!(value(&mut a.0, "C1"), Json::Null);
+        assert_eq!(value(&mut a.0, "B1").as_f64(), Some(2.0));
+        assert_eq!(a.0.active().unwrap().wb.sheets[0].zoom, 200);
+        assert_eq!(b.0.active().unwrap().wb.sheets[0].zoom, 100);
+        // Undoing a change to the sheet list isn't refused for a different zoom.
+        run(&mut a.0, "home.insertSheet", json!({"name": "Two"}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!(b.0.active().unwrap().wb.sheets.len(), 2);
+        run(&mut a.0, "edit.undo", json!({}));
+        sync(&mut [&mut a, &mut b]);
+        assert_eq!(b.0.active().unwrap().wb.sheets.len(), 1);
+        assert_eq!(a.0.active().unwrap().wb.sheets[0].zoom, 200);
+        // An opened file's zoom is everyone's to start with.
+        let mut wb = Workbook::new();
+        Arc::make_mut(&mut wb.sheets[0]).zoom = 150;
+        let update = a.1.open(&mut a.0, "zoomed.xlsx", wb).unwrap();
+        b.1.remote(&mut b.0, vec![update]);
+        assert_eq!(a.0.active().unwrap().wb.sheets[0].zoom, 150);
+        assert_eq!(b.0.active().unwrap().wb.sheets[0].zoom, 150);
     }
 
     #[test]
